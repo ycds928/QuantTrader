@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/inter-jetbrains-mono.css" rel="stylesheet"/>
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #3b82f6;
+      --color-primary-container:    #2563eb;
+      --color-on-primary:           #ffffff;
+      /* === 背景 / 表面（深色 TradingView 风格 4 级深度） === */
+      --color-background:                 #0a0a0f;
+      --color-surface-container-lowest:   #0e0e16;
+      --color-surface:                    #12121a;
+      --color-surface-container:          #16162a;
+      --color-surface-container-high:     #1a1a2e;
+      --color-surface-container-highest:  #242438;
+      /* === 文字 === */
+      --color-on-surface:           #e5e7eb;
+      --color-on-surface-variant:   #9ca3af;
+      /* === 功能色（中国惯例：红涨绿跌） === */
+      --color-success:  #22c55e;
+      --color-error:    #ef4444;
+      --color-warning:  #f59e0b;
+      --color-up:       #ef4444;
+      --color-down:     #22c55e;
+      /* === 边框 === */
+      --color-outline:          #2a2a3e;
+      --color-outline-variant:  #1e1e30;
+      /* === 圆角 === */
+      --radius-sm:   0.25rem;
+      --radius-md:   0.375rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影（深色主题高 opacity） === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      /* === 字体 === */
+      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cat = img.getAttribute('data-category') || '其他';
+      const alt = img.getAttribute('alt') || '';
+      const label = esc(alt.length > 8 ? alt.slice(0, 8) + '…' : alt);
+      const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      const icon = icons[cat] || '🖼';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 导航组件，不需要的页面则不要复制此段（从 @nav:start 到 @nav:end） -->
+  <div class="flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-56 shrink-0 bg-background flex flex-col border-r border-outline-variant/20">
+      <!-- Logo -->
+      <div class="h-14 flex items-center gap-2.5 px-5 border-b border-outline-variant/20">
+        <i data-lucide="candlestick-chart" class="w-5 h-5 text-primary"></i>
+        <span class="font-bold text-sm tracking-wide">QuantFlow</span>
+      </div>
+      <!-- Nav -->
+      <nav class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+        <a href="home.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>首页
+        </a>
+        <a href="api-data.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md bg-primary/10 text-primary text-sm font-medium transition-colors" aria-current="page">
+          <i data-lucide="activity" class="w-4 h-4"></i>行情数据
+        </a>
+        <a href="account.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="wallet" class="w-4 h-4"></i>账户交易
+        </a>
+        <a href="strategies.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="brain" class="w-4 h-4"></i>策略管理
+        </a>
+        <a href="execution.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="monitor-play" class="w-4 h-4"></i>执行监控
+        </a>
+        <a href="review.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="chart-bar" class="w-4 h-4"></i>复盘分析
+        </a>
+        <a href="replay.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="history" class="w-4 h-4"></i>历史回放
+        </a>
+      </nav>
+      <!-- Bottom -->
+      <div class="p-3 border-t border-outline-variant/20">
+        <div class="flex items-center gap-2 px-2 py-1.5">
+          <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">初</div>
+          <span class="text-sm text-on-surface-variant">小初</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Area -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- Top Header -->
+      <header class="h-14 shrink-0 bg-surface flex items-center justify-between px-6 border-b border-outline-variant/20">
+        <div class="flex items-center gap-3">
+          <h1 class="text-sm font-semibold" id="page-title">行情数据</h1>
+        </div>
+        <div class="flex items-center gap-4">
+          <!-- 搜索 -->
+          <div class="flex items-center gap-2 bg-surface-container rounded-md px-3 py-1.5 text-sm text-on-surface-variant">
+            <i data-lucide="search" class="w-3.5 h-3.5"></i>
+            <span>搜索...</span>
+          </div>
+          <!-- 连接状态 -->
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+            <span class="text-xs text-on-surface-variant">已连接</span>
+          </div>
+          <!-- 通知 -->
+          <button class="relative p-1.5 rounded-md hover:bg-surface-container-high transition-colors">
+            <i data-lucide="bell" class="w-4 h-4 text-on-surface-variant"></i>
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center">3</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- @nav:end 导航组件，不需要的页面则不要复制此段（从 @nav:start 到 @nav:end） -->
+
+      <!-- @main-content:start -->
+      <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
+        <div class="flex gap-5 h-full">
+
+          <!-- 左侧：搜索栏 + 表格 -->
+          <div class="flex-1 min-w-0 flex flex-col gap-4">
+
+            <!-- 搜索/筛选/刷新栏 -->
+            <div class="flex items-center gap-3">
+              <!-- 搜索输入框 -->
+              <div class="flex items-center gap-2 bg-surface-container border-none rounded-md px-3 py-2 flex-1 max-w-sm">
+                <i data-lucide="search" class="w-4 h-4 text-on-surface-variant shrink-0"></i>
+                <input id="search-input" type="text" placeholder="搜索交易对..." class="w-full bg-transparent border-none text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:outline-none" />
+              </div>
+              <!-- 交易所筛选下拉 -->
+              <select id="exchange-filter" class="bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary/30 cursor-pointer appearance-none min-w-[120px]">
+                <option value="all">全部交易所</option>
+                <option value="binance">Binance</option>
+                <option value="okx">OKX</option>
+              </select>
+              <!-- 刷新按钮 -->
+              <button id="btn-refresh" class="flex items-center gap-2 bg-surface-container border-none rounded-md px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors">
+                <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                <span>刷新</span>
+              </button>
+              <!-- 实时状态指示 -->
+              <div class="flex items-center gap-1.5 ml-auto">
+                <span class="w-1.5 h-1.5 rounded-full bg-success animate-pulse"></span>
+                <span class="text-xs text-on-surface-variant">实时更新中</span>
+              </div>
+            </div>
+
+            <!-- 行情表格 -->
+            <div class="bg-surface rounded-lg shadow-card overflow-hidden flex-1 flex flex-col">
+              <!-- 表头 -->
+              <div class="grid grid-cols-8 px-4 py-2.5 bg-surface-container text-xs font-semibold text-on-surface-variant uppercase tracking-wide shrink-0" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                <span>交易对</span>
+                <span class="text-right">最新价</span>
+                <span class="text-right">24h涨跌</span>
+                <span class="text-right">24h成交量</span>
+                <span class="text-right">24h最高</span>
+                <span class="text-right">24h最低</span>
+                <span class="text-center">收藏</span>
+                <span class="text-center">操作</span>
+              </div>
+
+              <!-- 表体 -->
+              <div id="ticker-table-body" class="divide-y divide-outline-variant/30 flex-1 overflow-y-auto">
+
+                <!-- 列表-行情1: BTC/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="BTC/USDT" data-exchange="binance" data-symbol-id="btc-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    BTC/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="67432.50">67,432.50</span>
+                  <span class="text-sm font-mono text-right text-up">+2.35%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">1,234,567</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">68,100.00</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">65,800.00</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="true">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-warning fill-warning"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=btc-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情2: ETH/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 bg-surface-container/40 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="ETH/USDT" data-exchange="binance" data-symbol-id="eth-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    ETH/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="3521.80">3,521.80</span>
+                  <span class="text-sm font-mono text-right text-up">+1.87%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">876,543</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">3,580.00</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">3,440.00</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="true">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-warning fill-warning"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=eth-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情3: SOL/USDT OKX -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="SOL/USDT" data-exchange="okx" data-symbol-id="sol-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">OKX</span>
+                    SOL/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="178.45">178.45</span>
+                  <span class="text-sm font-mono text-right text-down">-0.92%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">543,210</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">182.30</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">175.10</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=sol-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情4: BNB/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 bg-surface-container/40 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="BNB/USDT" data-exchange="binance" data-symbol-id="bnb-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    BNB/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="612.30">612.30</span>
+                  <span class="text-sm font-mono text-right text-up">+0.56%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">234,567</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">618.00</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">605.20</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="true">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-warning fill-warning"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=bnb-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情5: XRP/USDT OKX -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="XRP/USDT" data-exchange="okx" data-symbol-id="xrp-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">OKX</span>
+                    XRP/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="0.6234">0.6234</span>
+                  <span class="text-sm font-mono text-right text-down">-1.45%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">987,654</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.6380</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.6150</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=xrp-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情6: DOGE/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 bg-surface-container/40 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="DOGE/USDT" data-exchange="binance" data-symbol-id="doge-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    DOGE/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="0.1652">0.1652</span>
+                  <span class="text-sm font-mono text-right text-up">+5.21%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">2,345,678</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.1720</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.1550</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=doge-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情7: ADA/USDT OKX -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="ADA/USDT" data-exchange="okx" data-symbol-id="ada-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">OKX</span>
+                    ADA/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="0.4821">0.4821</span>
+                  <span class="text-sm font-mono text-right text-down">-0.38%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">345,678</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.4900</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">0.4750</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=ada-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情8: AVAX/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 bg-surface-container/40 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="AVAX/USDT" data-exchange="binance" data-symbol-id="avax-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    AVAX/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="38.75">38.75</span>
+                  <span class="text-sm font-mono text-right text-up">+3.12%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">567,890</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">39.80</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">37.20</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=avax-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情9: LINK/USDT OKX -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="LINK/USDT" data-exchange="okx" data-symbol-id="link-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">OKX</span>
+                    LINK/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="18.92">18.92</span>
+                  <span class="text-sm font-mono text-right text-up">+1.05%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">234,567</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">19.30</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">18.50</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=link-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+                <!-- 列表-行情10: DOT/USDT Binance -->
+                <div class="ticker-row grid grid-cols-8 px-4 py-2.5 bg-surface-container/40 hover:bg-surface-container-high transition-colors cursor-pointer" data-symbol="DOT/USDT" data-exchange="binance" data-symbol-id="dot-usdt" style="grid-template-columns: 2fr 1.2fr 1fr 1.2fr 1fr 1fr 0.5fr 0.8fr;">
+                  <span class="text-sm font-medium text-on-surface flex items-center gap-2">
+                    <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container-high px-1 py-0.5 rounded">BIN</span>
+                    DOT/USDT
+                  </span>
+                  <span class="text-sm font-mono text-on-surface text-right price-cell" data-base="7.83">7.83</span>
+                  <span class="text-sm font-mono text-right text-down">-2.18%</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">456,789</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">8.10</span>
+                  <span class="text-sm font-mono text-on-surface-variant text-right">7.65</span>
+                  <span class="flex justify-center">
+                    <button class="btn-star p-1 rounded hover:bg-surface-container transition-colors" data-favorited="false">
+                      <i data-lucide="star" class="w-3.5 h-3.5 text-on-surface-variant"></i>
+                    </button>
+                  </span>
+                  <span class="flex justify-center">
+                    <a href="symbol-detail.html?symbol_id=dot-usdt" class="text-xs text-primary font-medium hover:underline">详情</a>
+                  </span>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧：收藏快捷卡片 -->
+          <div class="w-64 shrink-0 flex flex-col gap-4">
+            <div class="flex items-center gap-2">
+              <i data-lucide="star" class="w-4 h-4 text-warning"></i>
+              <span class="text-sm font-semibold text-on-surface">自选收藏</span>
+              <span class="text-xs text-on-surface-variant ml-auto">3个</span>
+            </div>
+
+            <!-- 收藏卡片1: BTC/USDT -->
+            <div id="fav-card-btc" class="bg-surface rounded-lg shadow-card p-4 hover:bg-surface-container-high transition-colors cursor-pointer border border-outline-variant/10">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-sm font-semibold text-on-surface">BTC/USDT</span>
+                <span class="text-[10px] font-mono text-on-surface-variant bg-surface-container px-1.5 py-0.5 rounded">BIN</span>
+              </div>
+              <div class="flex items-end justify-between">
+                <span class="text-lg font-mono 

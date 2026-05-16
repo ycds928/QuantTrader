@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/inter-jetbrains-mono.css" rel="stylesheet"/>
+
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/echarts/echarts-5.5.0.min.js"></script>
+
+  <style type="text/tailwindcss">
+    @theme {
+      /* === 品牌色 === */
+      --color-primary:              #3b82f6;
+      --color-primary-container:    #2563eb;
+      --color-on-primary:           #ffffff;
+      /* === 背景 / 表面（深色 TradingView 风格 4 级深度） === */
+      --color-background:                 #0a0a0f;
+      --color-surface-container-lowest:   #0e0e16;
+      --color-surface:                    #12121a;
+      --color-surface-container:          #16162a;
+      --color-surface-container-high:     #1a1a2e;
+      --color-surface-container-highest:  #242438;
+      /* === 文字 === */
+      --color-on-surface:           #e5e7eb;
+      --color-on-surface-variant:   #9ca3af;
+      /* === 功能色（中国惯例：红涨绿跌） === */
+      --color-success:  #22c55e;
+      --color-error:    #ef4444;
+      --color-warning:  #f59e0b;
+      --color-up:       #ef4444;
+      --color-down:     #22c55e;
+      /* === 边框 === */
+      --color-outline:          #2a2a3e;
+      --color-outline-variant:  #1e1e30;
+      /* === 圆角 === */
+      --radius-sm:   0.25rem;
+      --radius-md:   0.375rem;
+      --radius-lg:   0.5rem;
+      --radius-xl:   0.75rem;
+      --radius-2xl:  1rem;
+      --radius-full: 9999px;
+      /* === 阴影（深色主题高 opacity） === */
+      --shadow-card:   0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float:  0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      /* === 字体 === */
+      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+  </style>
+
+  <!-- 图片兜底 -->
+  <script>
+    document.addEventListener('error', function (e) {
+      const img = e.target;
+      if (img.tagName !== 'IMG' || img.dataset.fallback) return;
+      img.dataset.fallback = '1';
+      const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const cat = img.getAttribute('data-category') || '其他';
+      const alt = img.getAttribute('alt') || '';
+      const label = esc(alt.length > 8 ? alt.slice(0, 8) + '…' : alt);
+      const icons = { '人物': '👤', '自然风景': '🏞', '动物': '🐾', '建筑城市': '🏙', '运动体育': '⚽', '交通工具': '🚗', '食物': '🍽', '服饰时尚': '👗', '商业科技': '💼', '游戏娱乐': '🎮', '艺术': '🎨', '其他': '🖼' };
+      const icon = icons[cat] || '🖼';
+      const w = img.width || 400, h = img.height || 300;
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="%23f3f4f6"/><text x="50%" y="45%" text-anchor="middle" font-size="${Math.min(w, h) * 0.18}" dominant-baseline="central">${icon}</text><text x="50%" y="68%" text-anchor="middle" font-size="${Math.min(w, h) * 0.07}" fill="%239ca3af" font-family="system-ui,sans-serif" dominant-baseline="central">${label}</text></svg>`;
+      img.src = 'data:image/svg+xml,' + svg;
+    }, true);
+  </script>
+</head>
+
+<body class="bg-background text-on-surface font-sans">
+
+  <!-- @nav:start 导航组件，不需要的页面则不要复制此段（从 @nav:start 到 @nav:end） -->
+  <div class="flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-56 shrink-0 bg-background flex flex-col border-r border-outline-variant/20">
+      <!-- Logo -->
+      <div class="h-14 flex items-center gap-2.5 px-5 border-b border-outline-variant/20">
+        <i data-lucide="candlestick-chart" class="w-5 h-5 text-primary"></i>
+        <span class="font-bold text-sm tracking-wide">QuantFlow</span>
+      </div>
+      <!-- Nav -->
+      <nav class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+        <a href="home.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md bg-primary/10 text-primary text-sm font-medium transition-colors" aria-current="page">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>首页
+        </a>
+        <a href="api-data.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="activity" class="w-4 h-4"></i>行情数据
+        </a>
+        <a href="account.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="wallet" class="w-4 h-4"></i>账户交易
+        </a>
+        <a href="strategies.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="brain" class="w-4 h-4"></i>策略管理
+        </a>
+        <a href="execution.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="monitor-play" class="w-4 h-4"></i>执行监控
+        </a>
+        <a href="review.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="chart-bar" class="w-4 h-4"></i>复盘分析
+        </a>
+        <a href="replay.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="history" class="w-4 h-4"></i>历史回放
+        </a>
+      </nav>
+      <!-- Bottom -->
+      <div class="p-3 border-t border-outline-variant/20">
+        <div class="flex items-center gap-2 px-2 py-1.5">
+          <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">初</div>
+          <span class="text-sm text-on-surface-variant">小初</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Area -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- Top Header -->
+      <header class="h-14 shrink-0 bg-surface flex items-center justify-between px-6 border-b border-outline-variant/20">
+        <div class="flex items-center gap-3">
+          <h1 class="text-sm font-semibold" id="page-title">首页</h1>
+        </div>
+        <div class="flex items-center gap-4">
+          <!-- 搜索 -->
+          <div class="flex items-center gap-2 bg-surface-container rounded-md px-3 py-1.5 text-sm text-on-surface-variant">
+            <i data-lucide="search" class="w-3.5 h-3.5"></i>
+            <span>搜索...</span>
+          </div>
+          <!-- 连接状态 -->
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+            <span class="text-xs text-on-surface-variant">已连接</span>
+          </div>
+          <!-- 通知 -->
+          <button id="btn-notification" class="relative p-1.5 rounded-md hover:bg-surface-container-high transition-colors">
+            <i data-lucide="bell" class="w-4 h-4 text-on-surface-variant"></i>
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center">3</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- @nav:end 导航组件，不需要的页面则不要复制此段（从 @nav:start 到 @nav:end） -->
+
+      <!-- @main-content:start -->
+      <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
+
+        <!-- 顶部指标卡片行 -->
+        <div class="grid grid-cols-4 gap-4 mb-6">
+
+          <!-- 指标卡-总资产 -->
+          <div id="card-total-assets" class="bg-surface-container-high shadow-card rounded-lg p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-medium text-on-surface-variant">总资产</span>
+              <div class="w-8 h-8 rounded-md bg-primary/15 flex items-center justify-center">
+                <i data-lucide="wallet" class="w-4 h-4 text-primary"></i>
+              </div>
+            </div>
+            <div class="font-mono text-2xl font-bold text-on-surface">¥1,258,432.50</div>
+            <div class="mt-1 text-xs text-on-surface-variant">较昨日 +¥18,230.00</div>
+          </div>
+
+          <!-- 指标卡-当日盈亏 -->
+          <div id="card-daily-pnl" class="bg-surface-container-high shadow-card rounded-lg p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-medium text-on-surface-variant">当日盈亏</span>
+              <div class="w-8 h-8 rounded-md bg-up/15 flex items-center justify-center">
+                <i data-lucide="trending-up" class="w-4 h-4 text-up"></i>
+              </div>
+            </div>
+            <div class="font-mono text-2xl font-bold text-up">+¥12,350.80</div>
+            <div class="mt-1 text-xs text-up font-mono">+0.99%</div>
+          </div>
+
+          <!-- 指标卡-运行策略数 -->
+          <a href="execution.html" id="card-strategy-count" class="bg-surface-container-high shadow-card rounded-lg p-4 block hover:bg-surface-container-highest transition-colors cursor-pointer">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-medium text-on-surface-variant">运行策略数</span>
+              <div class="w-8 h-8 rounded-md bg-primary/15 flex items-center justify-center">
+                <i data-lucide="brain" class="w-4 h-4 text-primary"></i>
+              </div>
+            </div>
+            <div class="font-mono text-2xl font-bold text-on-surface">3</div>
+            <div class="mt-1 text-xs text-on-surface-variant">1 个策略今日触发信号</div>
+          </a>
+
+          <!-- 指标卡-活跃告警 -->
+          <a href="execution.html" id="card-alert-count" class="bg-surface-container-high shadow-card rounded-lg p-4 block hover:bg-surface-container-highest transition-colors cursor-pointer">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-medium text-on-surface-variant">活跃告警</span>
+              <div class="w-8 h-8 rounded-md bg-warning/15 flex items-center justify-center">
+                <i data-lucide="alert-triangle" class="w-4 h-4 text-warning"></i>
+              </div>
+            </div>
+            <div class="font-mono text-2xl font-bold text-on-surface">2</div>
+            <div class="mt-1 text-xs text-warning">1 条 critical · 1 条 warning</div>
+          </a>
+
+        </div>
+
+        <!-- 中部图表行 -->
+        <div class="grid grid-cols-5 gap-4 mb-6">
+
+          <!-- 资产曲线（占3列） -->
+          <div class="col-span-3 bg-surface-container-high shadow-card rounded-lg p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-semibold text-on-surface">资产曲线</span>
+              <span class="text-xs text-on-surface-variant">近30天</span>
+            </div>
+            <div id="chart-asset-curve" class="w-full" style="height: 280px;"></div>
+          </div>
+
+          <!-- 持仓分布（占2列） -->
+          <div class="col-span-2 bg-surface-container-high shadow-card rounded-lg p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-semibold text-on-surface">持仓分布</span>
+              <span class="text-xs text-on-surface-variant">按市值占比</span>
+            </div>
+            <div id="chart-position-pie" class="w-full" style="height: 280px;"></div>
+          </div>
+
+        </div>
+
+        <!-- 底部数据行 -->
+        <div class="grid grid-cols-5 gap-4">
+
+          <!-- 最近交易记录（占3列） -->
+          <div class="col-span-3 bg-surface-container-high shadow-card rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
+              <span class="text-sm font-semibold text-on-surface">最近交易记录</span>
+              <a href="account.html" id="link-all-trades" class="text-xs text-primary hover:underline">查看全部</a>
+            </div>
+            <!-- 表头 -->
+            <div class="grid grid-cols-6 px-4 py-2 bg-surface-container text-xs font-semibold text-on-surface-variant tracking-wide">
+              <span>交易对</span>
+              <span>方向</span>
+              <span class="text-right">价格</span>
+              <span class="text-right">数量</span>
+              <span class="text-right">盈亏</span>
+              <span class="text-right">时间</span>
+            </div>
+            <div class="divide-y divide-outline-variant/20">
+              <!-- 交易记录-1 -->
+              <div class="grid grid-cols-6 px-4 py-2.5 hover:bg-surface-container/50 transition-colors cursor-pointer trade-row" data-symbol="BTC/USDT">
+                <span class="text-sm font-medium text-on-surface">BTC/USDT</span>
+                <span class="text-xs font-medium text-up">买入</span>
+                <span class="text-sm font-mono text-on-surface text-right">67,842.50</span>
+                <span class="text-sm font-mono text-on-surface text-right">0.1500</span>
+                <span class="text-sm font-mono text-up text-right">+¥1,823.40</span>
+                <span class="text-xs text-on-surface-variant text-right">14:32:05</span>
+              </div>
+              <!-- 交易记录-2 -->
+              <div class="grid grid-cols-6 px-4 py-2.5 hover:bg-surface-container/50 transition-colors cursor-pointer trade-row" data-symbol="ETH/USDT">
+                <span class="text-sm font-medium text-on-surface">ETH/USDT</span>
+                <span class="text-xs font-medium text-down">卖出</span>
+                <span class="text-sm font-mono text-on-surface text-right">3,521.80</span>
+                <span class="text-sm font-mono text-on-surface text-right">2.0000</span>
+                <span class="text-sm font-mono text-down text-right">-¥456.20</span>
+                <span class="text-xs text-on-surface-variant text-right">13:18:42</span>
+              </div>
+              <!-- 交易记录-3 -->
+              <div class="grid grid-cols-6 px-4 py-2.5 hover:bg-surface-container/50 transition-colors cursor-pointer trade-row" data-symbol="SOL/USDT">
+                <span class="text-sm font-medium text-on-surface">SOL/USDT</span>
+                <span class="text-xs font-medium text-up">买入</span>
+                <span class="text-sm font-mono text-on-surface text-right">178.35</span>
+                <span class="text-sm font-mono text-on-surface text-right">15.0000</span>
+                <span class="text-sm font-mono text-up text-right">+¥892.50</span>
+                <span class="text-xs text-on-surface-variant text-right">11:45:19</span>
+              </div>
+              <!-- 交易记录-4 -->
+              <div class="grid grid-cols-6 px-4 py-2.5 hover:bg-surface-container/50 transition-colors cursor-pointer trade-row" data-symbol="BTC/USDT">
+                <span class="text-sm font-medium text-on-surface">BTC/USDT</span>
+                <span class="text-xs font-medium text-down">卖出</span>
+                <span class="text-sm font-mono text-on-surface text-right">67,910.20</span>
+                <span class="text-sm font-mono text-on-surface text-right">0.0800</span>
+                <span class="text-sm font-mono text-up text-right">+¥540.56</span>
+                <span class="text-xs text-on-surface-variant text-right">10:22:37</span>
+              </div>
+              <!-- 交易记录-5 -->
+              <div class="grid grid-cols-6 px-4 py-2.5 hover:bg-surface-container/50 transition-colors cursor-pointer trade-row" data-symbol="ETH/USDT">
+                <span class="text-sm font-medium text-on-surface">ETH/USDT</span>
+                <span class="text-xs font-medium text-up">买入</span>
+                <span class="text-sm font-mono text-on-surface text-right">3,498.60</span>
+                <span class="text-sm font-mono text-on-surface text-right">1.5000</span>
+                <span class="text-sm font-mono text-down text-right">-¥234.90</span>
+                <span class="text-xs text-on-surface-variant text-right">09:07:51</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 告警列表（占2列） -->
+          <div class="col-span-2 bg-surface-container-high shadow-card rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-outline-variant/20">
+              <span class="text-sm font-semibold text-on-surface">告警列表</span>
+              <a href="execution.html" id="link-all-alerts" class="text-xs text-primary hover:underline">查看全部</a>
+            </div>
+            <div class="divide-y divide-outline-variant/20">
+              <!-- 告警-1 critical -->
+              <a href="execution.html" class="flex items-start gap-3 px-4 py-3 hover:bg-surface-container/50 transition-colors cursor-pointer alert-row">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold bg-error/20 text-error shrink-0 mt-0.5">critical</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-on-surface">网格策略-BTC</span>
+                  </div>
+                  <p class="text-xs text-on-surface-variant mt-0.5 truncate">单日最大回撤超过阈值 5%，当前回撤 6.2%</p>
+                </div>
+                <span class="text-[10px] text-on-surface-variant shrink-0 mt-0.5">14:28</span>
+              </a>
+              <!-- 告警-2 warning -->
+              <a href="execution.html" class="flex items-start gap-3 px-4 py-3 hover:bg-surface-container/50 transition-colors cursor-pointer alert-row">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold bg-warning/20 text-warning shrink-0 mt-0.5">warning</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-on-surface">均线交叉-ETH</span>
+                  </div>
+                  <p class="text-xs text-on-surface-variant mt-0.5 truncate">持仓占比达到 28%，接近上限 30%</p>
+                </div>
+                <span class="text-[10px] text-on-surface-variant shrink-0 mt-0.5">12:15</span>
+              </a>
+              <!-- 告警-3 warning -->
+              <a href="execution.html" class="flex items-start gap-3 px-4 py-3 hover:bg-surface-container/50 transition-colors cursor-pointer alert-row">
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold bg-warning/20 text-warning shrink-0 mt-0.5">warning</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-on-surface">动量策略-SOL</span>
+                  </div>
+                  <p class="text-xs text-on-surface-variant mt-0.5 truncate">下单频率超过限制，10分钟内下单 8 次</p>
+                </div>
+                <span class="text-[10px] text-on-surface-variant shrink-0 mt-0.5">10:43</span>
+              </a>
+            </div>
+          </div>
+
+        </div>
+
+      </main>
+      <!-- @main-content:end -->
+
+    </div>
+  </div>
+
+  <script>
+    // 初始化 ECharts 图表
+    $(function() {
+
+      // === 资产曲线图 ===
+      var assetChart = echarts.init($('#chart-asset-curve')[0]);
+
+      // 生成近30天模拟数据
+      var assetDates = [];
+      var assetValues = [];
+      var baseValue = 1220000;
+      for (var i = 29; i >= 0; i--) {
+        var d = new Date();
+        d.setDate(d.getDate() - i);
+        assetDates.push((d.getMonth() + 1) + '/' + d.getDate());
+        baseValue += Math.round((Math.random() - 0.35) * 8000);
+        baseValue = Math.max(baseValue, 1180000);
+        assetValues.push(baseValue);
+      }
+      // 确保最后一天接近 1258432
+      assetValues[assetValues.length - 1] = 1258432;
+
+      var assetOption = {
+        backgroundColor: 'transparent',
+        grid: {
+          left: 60,
+          right: 20,
+          top: 20,
+          bottom: 30
+        },
+        xAxis: {
+          type: 'category',
+          data: assetDates,
+          axisLine: { lineStyle: { color: '#2a2a3e' } },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#9ca3af',
+            fontSize: 10,
+            interval: 4
+          }
+        },
+        yAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: '#1e1e30', type: 'dashed' } },
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#9ca3af',
+            fontSize: 10,
+            formatter: function(v) {
+              return (v / 10000).toFixed(0) + '万';
+            }
+          }
+        },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#1a1a2e',
+          borderColor: '#2a2a3e',
+          textStyle: { color: '#e5e7eb', fontSize: 12 },
+          formatter: function(params) {
+            var p = params[0];
+            return p.name + '<br/>资产: <b>¥' + p.value.toLocaleString() + '</b>';
+          }
+        },
+        series: [{
+          type: 'line',
+          data: assetValues,
+          smooth: true,
+          showSymbol: false,
+          lineStyle: {
+            color: '#3b82f6',
+            width: 2
+          },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: 'rgba(59,130,246,0.35)' },
+                { offset: 1, color: 'rgba(59,130,246,0.02)' }
+              ]
+            }
+          }
+        }]
+      };
+      assetChart.setOption(assetOption);
+
+      // === 持仓分布饼图 ===
+      var pieChart = echarts.init($('#chart-position-pie')[0]);
+
+      var pieOption = {
+        backgroundColor: 'transparent',
+        tooltip: {
+          trigger: 'item',
+          backgroundColor: '#1a1a2e',
+          borderColor: '#2a2a3e',
+          textStyle: { color: '#e5e7eb', fontSize: 12 },
+          formatter: '{b}: {d}%'
+        },
+        legend: {
+          orient: 'vertical',
+          right: 10,
+          top: 'center',
+          textStyle: { color: '#9ca3af', fontSize: 11 },
+          itemWidth: 10,
+          itemHeight: 10,
+          itemGap: 12
+        },
+        series: [{
+          type: 'pie',
+          radius: ['42%', '70%'],
+          center: ['35%', '50%'],
+          avoidLabelOverlap: false,
+          label: {
+            show: true,
+            position: 'center',
+            formatter: '持仓',
+            fontSize: 13,
+            color: '#9ca3af'
+          },
+          emphasis: {
+            label: {
+              show: true,
+              fontSize: 14,
+              fontWeight: 'bold',
+              color: '#e5e7eb',
+              formatter: '{b}\n{d}%'
+            }
+          },
+          labelLine: { show: false },
+          data: [
+            { value: 45, name: 'BTC', itemStyle: { color: '#3b82f6' } },
+            { value: 30, name: 'ETH', itemStyle: { color: '#8b5cf6' } },
+            { value: 15, name: 'SOL', itemStyle: { color: '#06b6d4' } },
+            { value: 10, name: '其他', itemStyle: { color: '#4b5563' } }
+          ]
+        }]
+      };
+      pieChart.setOption(pieOption);
+
+      // 响应式
+      $(window).on('resize', function() {
+        assetChart.resize();
+        pieChart.resize();
+      });
+
+      // 交易记录行点击 → 跳转账户页
+      $('#link-all-trades').on('click', function(e) {
+        e.preventDefault();
+        window.location.href = 'account.html';
+      });
+
+      $('.trade-row').on('click', function() {
+        var symbol = $(this).data('symbol');
+        window.location.href = 'account.html?symbol=' + encodeURIComponent(symbol);
+      });
+
+      // 告警行点击 → 跳转执行监控页
+      $('#link-all-alerts').on('click', function(e) {
+        e.preventDefault();
+        window.location.href = 'execution.html';
+      });
+
+      $('.alert-row').on('click', function(e) {
+        e.preventDefault();
+        window.location.href = 'execution.html';
+      });
+
+      // 通知按钮点击
+      $('#btn-notification').on('click', function() {
+        console.log('通知面板：应弹出通知下拉面板，展示最近告警和系统通知列表');
+      });
+
+    });
+  </script>
+
+  <script>lucide.createIcons();</script>
+</body>
+
+</html>

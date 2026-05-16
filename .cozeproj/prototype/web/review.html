@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://lf-code-agent.coze.cn/obj/x-ai-cn/fonts/google/inter-jetbrains-mono.css" rel="stylesheet"/>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/jquery/jquery-3.7.1.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/lucide/lucide-1.11.0.min.js"></script>
+  <script src="https://lf-code-agent.coze.cn/obj/x-ai-cn/cdn/tailwindcss/tailwindcss-browser-4.2.4.min.js"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-primary: #3b82f6;
+      --color-primary-container: #2563eb;
+      --color-on-primary: #ffffff;
+      --color-background: #0a0a0f;
+      --color-surface-container-lowest: #0e0e16;
+      --color-surface: #12121a;
+      --color-surface-container: #16162a;
+      --color-surface-container-high: #1a1a2e;
+      --color-surface-container-highest: #242438;
+      --color-on-surface: #e5e7eb;
+      --color-on-surface-variant: #9ca3af;
+      --color-success: #22c55e;
+      --color-error: #ef4444;
+      --color-warning: #f59e0b;
+      --color-up: #ef4444;
+      --color-down: #22c55e;
+      --color-outline: #2a2a3e;
+      --color-outline-variant: #1e1e30;
+      --radius-sm: 0.25rem;
+      --radius-md: 0.375rem;
+      --radius-lg: 0.5rem;
+      --radius-xl: 0.75rem;
+      --radius-2xl: 1rem;
+      --radius-full: 9999px;
+      --shadow-card: 0 2px 8px rgba(0,0,0,0.4);
+      --shadow-float: 0 10px 25px rgba(0,0,0,0.5);
+      --shadow-dialog: 0 25px 50px rgba(0,0,0,0.6);
+      --font-sans: "Inter", "Noto Sans SC", system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+  </style>
+</head>
+<body class="bg-background text-on-surface font-sans">
+  <div class="flex h-screen overflow-hidden">
+    <aside class="w-56 shrink-0 bg-background flex flex-col border-r border-outline-variant/20">
+      <div class="h-14 flex items-center gap-2.5 px-5 border-b border-outline-variant/20">
+        <i data-lucide="candlestick-chart" class="w-5 h-5 text-primary"></i>
+        <span class="font-bold text-sm tracking-wide">QuantFlow</span>
+      </div>
+      <nav class="flex-1 py-3 px-3 space-y-0.5 overflow-y-auto">
+        
+        <a href="home.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="layout-dashboard" class="w-4 h-4"></i>首页
+        </a>
+        <a href="api-data.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="activity" class="w-4 h-4"></i>行情数据
+        </a>
+        <a href="account.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="wallet" class="w-4 h-4"></i>账户交易
+        </a>
+        <a href="strategies.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="brain" class="w-4 h-4"></i>策略管理
+        </a>
+        <a href="execution.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="monitor-play" class="w-4 h-4"></i>执行监控
+        </a>
+        <a href="review.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md bg-primary/10 text-primary text-sm font-medium transition-colors" aria-current="page">
+          <i data-lucide="chart-bar" class="w-4 h-4"></i>复盘分析
+        </a>
+        <a href="replay.html" class="nav-item flex items-center gap-3 px-3 py-2 rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface text-sm font-medium transition-colors">
+          <i data-lucide="history" class="w-4 h-4"></i>历史回放
+        </a>
+      </nav>
+      <div class="p-3 border-t border-outline-variant/20">
+        <div class="flex items-center gap-2 px-2 py-1.5">
+          <div class="w-7 h-7 rounded-full bg-primary/20 text-primary flex items-center justify-center text-xs font-bold">初</div>
+          <span class="text-sm text-on-surface-variant">小初</span>
+        </div>
+      </div>
+    </aside>
+    <div class="flex-1 flex flex-col min-w-0">
+      <header class="h-14 shrink-0 bg-surface flex items-center justify-between px-6 border-b border-outline-variant/20">
+        <h1 class="text-sm font-semibold">复盘分析</h1>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2 bg-surface-container rounded-md px-3 py-1.5 text-sm text-on-surface-variant">
+            <i data-lucide="search" class="w-3.5 h-3.5"></i><span>搜索...</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
+            <span class="text-xs text-on-surface-variant">已连接</span>
+          </div>
+          <button class="relative p-1.5 rounded-md hover:bg-surface-container-high transition-colors">
+            <i data-lucide="bell" class="w-4 h-4 text-on-surface-variant"></i>
+            <span class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-error text-white text-[10px] font-bold rounded-full flex items-center justify-center">3</span>
+          </button>
+        </div>
+      </header>
+      <main class="flex-1 min-w-0 overflow-y-auto bg-background p-6">
+        <div class="flex flex-col items-center justify-center h-full text-on-surface-variant">
+          <i data-lucide="chart-bar" class="w-12 h-12 mb-4 opacity-30"></i>
+          <h2 class="text-lg font-semibold mb-2 text-on-surface">复盘分析</h2>
+          <p class="text-sm">该模块正在开发中</p>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script>lucide.createIcons();</script>
+</body>
+</html>
