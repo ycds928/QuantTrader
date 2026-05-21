@@ -1,139 +1,202 @@
+import { useState, useEffect } from 'react'
+import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-react'
 import { AppLayout } from '@/common/components'
+import { formatNumber, formatPercent } from '@/common/utils'
+import { getSectorList, getBatchRealtimeQuote, getStockList } from '@/api-data/api'
+import type { SectorInfo, RealTimeQuote } from '@/api-data/types'
 
 export default function Dashboard() {
+  const [sectors, setSectors] = useState<SectorInfo[]>([])
+  const [hotStocks, setHotStocks] = useState<Array<RealTimeQuote & { name: string }>>([])
+  const [marketStats, setMarketStats] = useState({ upCount: 0, downCount: 0, volume: 0 })
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    loadDashboardData()
+  }, [])
+
+  async function loadDashboardData() {
+    setLoading(true)
+    try {
+      const [sectorList, stockList] = await Promise.all([
+        getSectorList(),
+        getStockList(),
+      ])
+      setSectors(sectorList)
+
+      // 获取热门股票行情（取前10只）
+      const symbols = stockList.slice(0, 10).map(s => s.symbol)
+      const quotes = await getBatchRealtimeQuote({ symbols })
+      const quotesMap: Record<string, string> = {}
+      stockList.forEach(s => { quotesMap[s.symbol] = s.name })
+
+      const hotStocksWithName = quotes.map(q => ({
+        ...q,
+        name: quotesMap[q.symbol] || q.symbol,
+      })) as Array<RealTimeQuote & { name: string }>
+
+      // 按涨跌幅排序
+      hotStocksWithName.sort((a, b) => b.change_pct - a.change_pct)
+      setHotStocks(hotStocksWithName)
+
+      // 计算市场统计
+      const upCount = quotes.filter(q => q.change_pct > 0).length
+      const downCount = quotes.filter(q => q.change_pct < 0).length
+      const totalVolume = quotes.reduce((acc, q) => acc + q.volume, 0)
+      setMarketStats({
+        upCount,
+        downCount,
+        volume: totalVolume,
+      })
+    } catch (e) {
+      console.error('Failed to load dashboard:', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* 顶部指标卡片行 */}
+      <div className="space-y-4">
+        {/* 顶部统计卡片 */}
         <div className="grid grid-cols-4 gap-4">
-          <MetricCard label="总资产" value="¥1,258,432.50" icon="wallet" />
-          <MetricCard
-            label="当日盈亏"
-            value="+¥12,350.80"
-            subvalue="+0.99%"
-            trend="up"
-          />
-          <MetricCard label="运行策略" value="3" icon="brain" />
-          <MetricCard label="活跃告警" value="2" icon="alert-triangle" />
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <div className="text-xs text-on-surface-variant mb-1">上涨家数</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xl font-bold text-up">{marketStats.upCount}</span>
+              <TrendingUp className="w-4 h-4 text-up" />
+            </div>
+          </div>
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <div className="text-xs text-on-surface-variant mb-1">下跌家数</div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-xl font-bold text-down">{marketStats.downCount}</span>
+              <TrendingDown className="w-4 h-4 text-down" />
+            </div>
+          </div>
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <div className="text-xs text-on-surface-variant mb-1">总成交量</div>
+            <div className="text-xl font-bold font-mono-num">{formatNumber(marketStats.volume)}</div>
+          </div>
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs text-on-surface-variant mb-1">市场情绪</div>
+                <div className="text-xl font-bold">
+                  {marketStats.upCount > marketStats.downCount ? (
+                    <span className="text-up">偏多</span>
+                  ) : marketStats.upCount < marketStats.downCount ? (
+                    <span className="text-down">偏空</span>
+                  ) : (
+                    <span>中性</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={loadDashboardData}
+                disabled={loading}
+                className="p-2 rounded-md hover:bg-surface-container-high transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* 中部图表区 */}
+        {/* 中部：板块和热门股票 */}
         <div className="grid grid-cols-3 gap-4">
-          {/* 资产曲线 */}
-          <div className="col-span-2 bg-surface-container-high shadow-card rounded-lg p-5">
-            <h3 className="text-sm font-semibold mb-4">资产曲线</h3>
-            <div className="h-64 flex items-center justify-center text-on-surface-variant text-sm">
-              资产曲线图表（ECharts）
-            </div>
-          </div>
-
-          {/* 持仓分布 */}
-          <div className="bg-surface-container-high shadow-card rounded-lg p-5">
-            <h3 className="text-sm font-semibold mb-4">持仓分布</h3>
-            <div className="h-64 flex items-center justify-center text-on-surface-variant text-sm">
-              持仓饼图（ECharts）
-            </div>
-          </div>
-        </div>
-
-        {/* 底部区域 */}
-        <div className="grid grid-cols-2 gap-4">
-          {/* 最近交易 */}
-          <div className="bg-surface-container-high shadow-card rounded-lg p-5">
-            <h3 className="text-sm font-semibold mb-4">最近交易</h3>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-on-surface-variant text-xs">
-                  <th className="text-left py-2 font-medium">交易对</th>
-                  <th className="text-left py-2 font-medium">方向</th>
-                  <th className="text-right py-2 font-medium">价格</th>
-                  <th className="text-right py-2 font-medium">数量</th>
-                  <th className="text-right py-2 font-medium">盈亏</th>
-                  <th className="text-right py-2 font-medium">时间</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/20">
-                {[
-                  { symbol: 'BTC/USDT', side: '买入', price: '97,245.30', qty: '0.12', pnl: '+¥1,234.50', pnlUp: true, time: '14:32:05' },
-                  { symbol: 'ETH/USDT', side: '卖出', price: '3,856.20', qty: '2.50', pnl: '-¥320.00', pnlUp: false, time: '13:18:42' },
-                  { symbol: 'SOL/USDT', side: '买入', price: '185.60', qty: '50', pnl: '+¥890.00', pnlUp: true, time: '11:05:28' },
-                  { symbol: 'BTC/USDT', side: '卖出', price: '97,102.80', qty: '0.05', pnl: '-¥56.75', pnlUp: false, time: '10:22:15' },
-                  { symbol: 'ETH/USDT', side: '买入', price: '3,812.40', qty: '5.00', pnl: '+¥2,190.00', pnlUp: true, time: '09:45:33' },
-                ].map((row, i) => (
-                  <tr key={i} className="hover:bg-surface-container-highest transition-colors">
-                    <td className="py-2 font-medium">{row.symbol}</td>
-                    <td className={`py-2 ${row.side === '买入' ? 'text-up' : 'text-down'}`}>{row.side}</td>
-                    <td className="py-2 text-right font-mono-num">{row.price}</td>
-                    <td className="py-2 text-right font-mono-num">{row.qty}</td>
-                    <td className={`py-2 text-right font-mono-num ${row.pnlUp ? 'text-up' : 'text-down'}`}>{row.pnl}</td>
-                    <td className="py-2 text-right text-on-surface-variant">{row.time}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* 告警列表 */}
-          <div className="bg-surface-container-high shadow-card rounded-lg p-5">
-            <h3 className="text-sm font-semibold mb-4">活跃告警</h3>
-            <div className="space-y-3">
-              {[
-                { level: 'critical', strategy: '网格交易-BTC', message: '单笔亏损超过止损阈值 -2.5%', time: '14:28:10' },
-                { level: 'warning', strategy: '趋势追踪-ETH', message: '持仓占比超过 80% 上限', time: '13:55:32' },
-                { level: 'critical', strategy: '均线交叉-SOL', message: '连续亏损达到 5 次', time: '12:10:05' },
-              ].map((alert, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 bg-surface-container rounded-lg">
-                  <span
-                    className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${
-                      alert.level === 'critical'
-                        ? 'bg-error/20 text-error'
-                        : 'bg-warning/20 text-warning'
-                    }`}
-                  >
-                    {alert.level === 'critical' ? '严重' : '警告'}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{alert.strategy}</span>
-                      <span className="text-xs text-on-surface-variant">{alert.time}</span>
-                    </div>
-                    <p className="text-xs text-on-surface-variant mt-0.5">{alert.message}</p>
+          {/* 板块列表 */}
+          <div className="col-span-1 bg-surface-container-high rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-3">板块列表</h3>
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {sectors.map(sector => (
+                <div
+                  key={sector.sector_code}
+                  className="flex items-center justify-between p-2 rounded-md bg-surface-container hover:bg-surface-container-high transition-colors cursor-pointer"
+                >
+                  <div>
+                    <div className="text-sm font-medium">{sector.sector_name}</div>
+                    <div className="text-xs text-on-surface-variant">{sector.stock_count}只股票</div>
                   </div>
                 </div>
               ))}
+              {sectors.length === 0 && (
+                <div className="text-sm text-on-surface-variant text-center py-4">暂无数据</div>
+              )}
+            </div>
+          </div>
+
+          {/* 热门股票 */}
+          <div className="col-span-2 bg-surface-container-high rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-3">热门股票</h3>
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {hotStocks.map(stock => (
+                <div
+                  key={stock.symbol}
+                  className="flex items-center justify-between p-2 rounded-md bg-surface-container hover:bg-surface-container-high transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div>
+                      <div className="text-sm font-medium">{stock.name}</div>
+                      <div className="text-xs text-on-surface-variant font-mono-num">{stock.symbol}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-mono-num font-medium">{formatNumber(stock.last_price)}</div>
+                    <div className={`text-xs font-mono-num ${stock.change_pct >= 0 ? 'text-up' : 'text-down'}`}>
+                      {stock.change_pct >= 0 ? '+' : ''}{formatPercent(stock.change_pct)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {hotStocks.length === 0 && (
+                <div className="text-sm text-on-surface-variant text-center py-4">暂无数据</div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 涨幅/跌幅榜 */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* 涨幅榜 */}
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-3 text-up">涨幅榜</h3>
+            <div className="space-y-2">
+              {hotStocks.filter(s => s.change_pct > 0).slice(0, 5).map(stock => (
+                <div key={stock.symbol} className="flex items-center justify-between p-2 rounded-md bg-surface-container">
+                  <div>
+                    <span className="text-sm font-medium">{stock.name}</span>
+                    <span className="text-xs text-on-surface-variant ml-2 font-mono-num">{stock.symbol}</span>
+                  </div>
+                  <span className="text-sm font-mono-num text-up">+{formatPercent(stock.change_pct)}</span>
+                </div>
+              ))}
+              {hotStocks.filter(s => s.change_pct > 0).length === 0 && (
+                <div className="text-sm text-on-surface-variant text-center py-2">暂无数据</div>
+              )}
+            </div>
+          </div>
+
+          {/* 跌幅榜 */}
+          <div className="bg-surface-container-high rounded-lg p-4">
+            <h3 className="text-sm font-semibold mb-3 text-down">跌幅榜</h3>
+            <div className="space-y-2">
+              {hotStocks.filter(s => s.change_pct < 0).slice(0, 5).map(stock => (
+                <div key={stock.symbol} className="flex items-center justify-between p-2 rounded-md bg-surface-container">
+                  <div>
+                    <span className="text-sm font-medium">{stock.name}</span>
+                    <span className="text-xs text-on-surface-variant ml-2 font-mono-num">{stock.symbol}</span>
+                  </div>
+                  <span className="text-sm font-mono-num text-down">{formatPercent(stock.change_pct)}</span>
+                </div>
+              ))}
+              {hotStocks.filter(s => s.change_pct < 0).length === 0 && (
+                <div className="text-sm text-on-surface-variant text-center py-2">暂无数据</div>
+              )}
             </div>
           </div>
         </div>
       </div>
     </AppLayout>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  subvalue,
-  trend,
-}: {
-  label: string
-  value: string
-  subvalue?: string
-  trend?: 'up' | 'down'
-  icon?: string
-}) {
-  return (
-    <div className="bg-surface-container-high shadow-card rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-on-surface-variant">{label}</span>
-      </div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-xl font-bold font-mono-num">{value}</span>
-        {subvalue && (
-          <span className={`text-sm font-mono-num ${trend === 'up' ? 'text-up' : 'text-down'}`}>
-            {subvalue}
-          </span>
-        )}
-      </div>
-    </div>
   )
 }

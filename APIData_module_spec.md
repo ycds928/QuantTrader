@@ -528,3 +528,75 @@ await stock_service.batch_sync_stock_base_to_db(["000001", "000002"])
 4. **批量操作支持**: 批量获取、批量写入数据库
 5. **数据模型统一**: SQLAlchemy模型与Pydantic模型分离，数据库结构与API响应解耦
 6. **异步优先**: 使用 SQLAlchemy 2.0 async 模式，配合 `await` 异步操作
+
+---
+
+## 14. 开发状态 (2026-05-21)
+
+### Phase 1: 已完成 ✅
+- [x] `backend/api_data/models.py` - SQLAlchemy 模型
+  - StockBaseInfoModel, KLineDataModel, RealtimeQuoteModel, SectorInfoModel
+  - 继承 Base + TimestampMixin
+- [x] `backend/api_data/schemas.py` - Pydantic 模型
+  - StockBaseInfo, KLineData, RealTimeQuote, SectorInfo
+  - 请求模型: KLineQuery, BatchStockQuery, StockSyncRequest, KLineSyncRequest
+- [x] `backend/api_data/repository.py` - Repository 层
+  - StockRepository, KLineRepository, RealtimeQuoteRepository, SectorRepository
+  - 所有方法为 async def
+- [x] `backend/api_data/adapters/base.py` - DataSourceAdapter Protocol
+- [x] `backend/api_data/adapters/mock.py` - MockAdapter (内存测试数据)
+- [x] `backend/api_data/adapters/__init__.py`
+- [x] `backend/api_data/service.py` - Service 层
+  - StockService, KLineService, MarketDataService, SectorService
+  - 依赖注入 data_source + repository
+- [x] `backend/api_data/router.py` - API 接口已实现
+- [x] `backend/common/dependencies.py` - get_data_source() 依赖注入
+- [x] `frontend/src/api-data/types/index.ts` - TypeScript 类型
+- [x] `frontend/src/api-data/api/index.ts` - API 请求函数
+- [x] `frontend/src/api-data/pages/ApiData.tsx` - 股票搜索和列表
+- [x] `frontend/src/api-data/pages/SymbolDetail.tsx` - 股票详情+K线图表
+- [x] `frontend/src/api-data/pages/Dashboard.tsx` - 市场概览
+
+### Phase 2: 未完成 ❌
+- [ ] 创建 `AkshareAdapter` 实现真实的 akshare 数据调用
+- [ ] 创建 `BaostockAdapter` 实现真实的 baostock 数据调用
+- [ ] 数据库表创建脚本
+- [ ] 数据同步调度机制
+
+### 当前数据源
+- **使用**: MockAdapter (内存模拟数据)
+- **位置**: `backend/api_data/adapters/mock.py`
+- **切换方式**: 修改 `backend/common/dependencies.py` 中的 `get_data_source()`
+
+### 当前数据库
+- **配置**: SQLite 本地测试 (因远程 MySQL 不可用)
+- **位置**: `backend/quant_trader.db`
+- **连接**: `sqlite+aiosqlite:///./quant_trader.db`
+
+### API 端点测试结果
+```
+✅ GET /api/api-data/stock/list          → 10只股票
+✅ GET /api/api-data/kline/000001       → K线数据正常
+✅ GET /api/api-data/realtime/000001     → 实时行情正常
+✅ GET /api/api-data/sector              → 板块列表正常
+✅ GET /api/api-data/sector/BK0001/stocks → 板块成分股正常
+```
+
+### 待其他模块调用的接口
+其他模块可通过以下方式获取股票数据：
+```python
+# 方式1: 直接调用 API
+GET http://localhost:8000/api/api-data/stock/list
+GET http://localhost:8000/api/api-data/kline/{symbol}
+GET http://localhost:8000/api/api-data/realtime/{symbol}
+GET http://localhost:8000/api/api-data/sector
+
+# 方式2: 导入 api_data 模块（需等 Phase 2）
+from api_data.service import StockService, KLineService
+```
+
+### 下一步工作
+1. 实现 AkshareAdapter 替换 MockAdapter
+2. 解决 MySQL 数据库连接问题
+3. 创建数据库表初始化脚本
+4. 实现定时数据同步
