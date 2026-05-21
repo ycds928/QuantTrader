@@ -26,19 +26,14 @@ class Settings(BaseSettings):
     # 安全
     ENCRYPTION_KEY: str = ""
 
-    # 数据库URL（支持SQLite和MySQL）
-    DATABASE_URL: str = ""
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property
     def DATABASE_URL(self) -> str:
-        if self.DATABASE_URL:
-            return self.DATABASE_URL
         return (
             f"mysql+aiomysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
             f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
         )
-
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 @lru_cache()

@@ -569,9 +569,10 @@ await stock_service.batch_sync_stock_base_to_db(["000001", "000002"])
 - **切换方式**: 修改 `backend/common/dependencies.py` 中的 `get_data_source()`
 
 ### 当前数据库
-- **配置**: SQLite 本地测试 (因远程 MySQL 不可用)
-- **位置**: `backend/quant_trader.db`
-- **连接**: `sqlite+aiosqlite:///./quant_trader.db`
+- **配置**: MySQL (阿里云 RDS)
+- **连接信息**: 见 `backend/.env`
+- **问题**: 当前连接失败 (Access denied)，需要检查 RDS 白名单设置
+- **备选**: 可使用 SQLite 本地测试 (`DATABASE_URL=sqlite+aiosqlite:///./quant_trader.db`)
 
 ### API 端点测试结果
 ```
@@ -600,3 +601,32 @@ from api_data.service import StockService, KLineService
 2. 解决 MySQL 数据库连接问题
 3. 创建数据库表初始化脚本
 4. 实现定时数据同步
+
+---
+
+## 15. 代码风格合规性
+
+### 检查结果 (2026-05-21)
+
+| 检查项 | 状态 | 说明 |
+|-------|------|------|
+| 后端命名 (snake_case) | ✅ | models.py, repository.py, adapters/ |
+| 前端命名 (kebab-case) | ✅ | api-data/pages/, api-data/types/ |
+| 类型注解 | ✅ | 后端函数标注类型，前端 interface/type 定义 |
+| 路径别名 (@/) | ✅ | 使用 `@/` 而不是相对路径 |
+| 导入顺序 | ✅ | 标准库 → 第三方 → 本地 |
+| async/await | ✅ | Repository 层全部使用 async |
+| CSS 变量 class | ✅ | 使用 bg-surface-container-high 等 class |
+
+### 已知偏差
+
+| 问题 | 说明 | 处理方式 |
+|------|------|---------|
+| 前端组件默认导出 | CODE_STYLE.md 第73行要求禁止默认导出，但 lazy() 动态导入需要默认导出 | 保持与其他模块一致，后续统一修改 |
+| 提交信息格式 | 应使用 `feat(api-data): ...` 格式 | 本次已按计划执行 |
+
+### 相关文件
+- `frontend/src/api-data/pages/ApiData.tsx`
+- `frontend/src/api-data/pages/SymbolDetail.tsx`
+- `frontend/src/api-data/pages/Dashboard.tsx`
+- `frontend/src/common/router/routes.ts`
