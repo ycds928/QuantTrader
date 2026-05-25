@@ -605,3 +605,91 @@ class BacktestOrderStatusLog(Base, IdMixin, CreatedAtMixin):
     event_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, comment="事件时间")
     detail_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="事件详情")
     message: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="事件说明")
+
+
+class LiveCashFlow(Base, IdMixin, CreatedAtMixin):
+    __tablename__ = "live_cash_flow"
+    __table_args__ = (
+        Index("idx_live_cash_account_date", "account_id", "trade_date"),
+        Index("idx_live_cash_ref", "ref_type", "ref_id"),
+        {"comment": "实盘现金流水"},
+    )
+
+    account_id: Mapped[int] = mapped_column(ForeignKey("trading_account.id"), nullable=False, comment="实盘账户ID")
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, comment="发生日期")
+    flow_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="流水类型：deposit/withdraw/freeze/unfreeze/trade_fee/tax/trade_cash")
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="关联对象类型：order/trade/manual")
+    ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="关联对象ID或编号")
+    amount: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False, comment="流水金额，收入为正，支出为负")
+    balance_after: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True, comment="流水发生后的资金余额")
+    remark: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="备注")
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="原始流水数据")
+
+
+class PaperCashFlow(Base, IdMixin, CreatedAtMixin):
+    __tablename__ = "paper_cash_flow"
+    __table_args__ = (
+        Index("idx_paper_cash_account_date", "account_id", "trade_date"),
+        Index("idx_paper_cash_ref", "ref_type", "ref_id"),
+        {"comment": "模拟盘现金流水"},
+    )
+
+    account_id: Mapped[int] = mapped_column(ForeignKey("trading_account.id"), nullable=False, comment="模拟盘账户ID")
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, comment="发生日期")
+    flow_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="流水类型：deposit/withdraw/freeze/unfreeze/trade_fee/tax/trade_cash")
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="关联对象类型：order/trade/manual")
+    ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="关联对象ID或编号")
+    amount: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False, comment="流水金额，收入为正，支出为负")
+    balance_after: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True, comment="流水发生后的资金余额")
+    remark: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="备注")
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="原始流水数据")
+
+
+class BacktestCashFlow(Base, IdMixin, CreatedAtMixin):
+    __tablename__ = "backtest_cash_flow"
+    __table_args__ = (
+        ForeignKeyConstraint(["run_id"], ["backtest_run.run_id"]),
+        Index("idx_backtest_cash_account_date", "account_id", "trade_date"),
+        Index("idx_backtest_cash_run_date", "run_id", "trade_date"),
+        Index("idx_backtest_cash_ref", "ref_type", "ref_id"),
+        {"comment": "回测现金流水"},
+    )
+
+    account_id: Mapped[int] = mapped_column(ForeignKey("trading_account.id"), nullable=False, comment="回测账户ID")
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="回测运行批次ID")
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, comment="发生日期")
+    flow_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="流水类型：deposit/withdraw/freeze/unfreeze/trade_fee/tax/trade_cash")
+    ref_type: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="关联对象类型：order/trade/manual")
+    ref_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="关联对象ID或编号")
+    amount: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False, comment="流水金额，收入为正，支出为负")
+    balance_after: Mapped[float | None] = mapped_column(Numeric(20, 4), nullable=True, comment="流水发生后的资金余额")
+    remark: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="备注")
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="原始流水数据")
+
+
+class PaperSimulationRun(Base, IdMixin, TimestampMixin):
+    __tablename__ = "paper_simulation_run"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uk_paper_simulation_run_id"),
+        Index("idx_paper_simulation_account", "account_id"),
+        Index("idx_paper_simulation_strategy", "strategy_id", "version_id"),
+        Index("idx_paper_simulation_date", "start_date", "end_date"),
+        {"comment": "模拟盘运行批次"},
+    )
+
+    run_id: Mapped[str] = mapped_column(String(64), nullable=False, comment="模拟运行批次ID")
+    account_id: Mapped[int] = mapped_column(ForeignKey("trading_account.id"), nullable=False, comment="模拟盘账户ID")
+    strategy_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="策略ID")
+    version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="策略版本ID")
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True, comment="模拟开始日期")
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True, comment="模拟结束日期")
+    initial_cash: Mapped[float] = mapped_column(Numeric(20, 4), nullable=False, comment="初始资金")
+    benchmark_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, comment="基准指数代码")
+    frequency: Mapped[str | None] = mapped_column(String(16), nullable=True, comment="模拟频率，如 daily/1m/5m")
+    market_data_source: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="行情源")
+    matching_rule: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="撮合规则")
+    params_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="模拟参数")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="created", comment="created/running/done/failed/canceled")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="开始时间")
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="结束时间")
+    summary_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True, comment="模拟结果摘要")
