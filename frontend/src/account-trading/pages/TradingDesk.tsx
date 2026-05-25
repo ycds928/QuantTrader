@@ -127,7 +127,8 @@ export default function TradingDesk() {
     [busy]
   )
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || null
-  const selectedAccountTradeable = !selectedAccount || selectedAccount.account_type === 'live' || selectedAccount.account_type === 'paper'
+  const selectedAccountTradeable = !selectedAccount || ['live', 'paper', 'backtest'].includes(selectedAccount.account_type)
+  const selectedEngine = selectedAccount ? engineLabel(selectedAccount.account_type) : '桌面实盘引擎'
 
   useEffect(() => {
     void refreshAccounts()
@@ -246,7 +247,7 @@ export default function TradingDesk() {
       setError('当前选择的账户暂不支持交易台下单。')
       return
     }
-    const mode = selectedAccount?.account_type === 'paper' ? 'paper' : 'live'
+    const mode = selectedAccount?.account_type || 'live'
     const data = await callApi<Record<string, unknown>>('order', () =>
       request.post(
         '/account/order',
@@ -295,7 +296,7 @@ export default function TradingDesk() {
     event.preventDefault()
     if (!cancelEntrustNo.trim()) return
     if (selectedAccount && selectedAccount.account_type !== 'live') {
-      setError('模拟账户当前按委托价立即成交，暂不提供撤单。')
+      setError('当前账户引擎暂不支持在交易台撤单。')
       return
     }
     const data = await callApi<Record<string, unknown>>('cancel', () =>
@@ -318,7 +319,7 @@ export default function TradingDesk() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className="text-xl font-semibold text-on-surface">交易界面</h1>
-            <p className="mt-1 text-sm text-on-surface-variant">实盘连接同花顺交易端，模拟盘按委托价立即成交并更新账户记录。</p>
+            <p className="mt-1 text-sm text-on-surface-variant">根据账户类型自动选择桌面实盘引擎、模拟交易引擎或回测交易引擎。</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 rounded-md bg-surface-container px-3 py-2 text-sm text-on-surface-variant">
@@ -357,7 +358,7 @@ export default function TradingDesk() {
             </label>
             <div className="rounded-md bg-surface-container px-3 py-2 text-xs text-on-surface-variant">
               {selectedAccount
-                ? `已选择：${selectedAccount.account_name}（${accountTypeLabel(selectedAccount.account_type)}）。${selectedAccount.account_type === 'paper' ? '模拟交易会按委托价立即成交。' : selectedAccount.account_type === 'live' ? '实盘交易会通过同花顺桌面自动化执行。' : '该类型暂不支持交易台下单。'}`
+                ? `已选择：${selectedAccount.account_name}（${accountTypeLabel(selectedAccount.account_type)}）。当前使用${selectedEngine}。`
                 : '未选择账户时，交易操作跟随同花顺当前登录账户。'}
             </div>
           </div>
@@ -380,8 +381,8 @@ export default function TradingDesk() {
           <div className="space-y-4">
             <section className="rounded-lg bg-surface-container-high p-4 shadow-card">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-semibold">实盘委托</h2>
-                <span className="rounded-sm bg-error/10 px-2 py-1 text-xs text-error">LIVE</span>
+                <h2 className="text-sm font-semibold">交易委托</h2>
+                <span className="rounded-sm bg-primary/10 px-2 py-1 text-xs text-primary">{selectedEngine}</span>
               </div>
               <form className="space-y-3" onSubmit={submitOrder}>
                 <div className="grid grid-cols-2 gap-2 rounded-md bg-surface-container p-1">
@@ -592,4 +593,11 @@ function accountTypeLabel(value: string) {
   if (value === 'paper') return '模拟盘'
   if (value === 'backtest') return '回测盘'
   return value || '-'
+}
+
+function engineLabel(value: string) {
+  if (value === 'live') return '桌面实盘引擎'
+  if (value === 'paper') return '模拟交易引擎'
+  if (value === 'backtest') return '回测交易引擎'
+  return '未知交易引擎'
 }

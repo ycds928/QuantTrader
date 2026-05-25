@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/account", tags=["账户与交易"])
 
 
 OrderSide = Literal["buy", "sell"]
-AccountMode = Literal["live", "paper"]
+AccountMode = Literal["live", "paper", "backtest"]
 OrderScope = Literal["today", "history"]
 ManagedAccountType = Literal["live", "paper", "backtest"]
 ManagedAccountStatus = Literal["active", "inactive", "archived"]
@@ -108,6 +108,16 @@ class SyncRequest(BaseModel):
 
 def ok(data: Any, message: str = "ok") -> ApiResponse:
     return ApiResponse(success=True, data=data, message=message)
+
+
+def engine_label(account_type: str) -> str:
+    if account_type == "live":
+        return "desktop_live"
+    if account_type == "paper":
+        return "paper_trading"
+    if account_type == "backtest":
+        return "backtest_trading"
+    return "unknown"
 
 
 def raise_api_error(exc: Exception) -> None:
@@ -201,6 +211,8 @@ async def get_account_context(
     else:
         status_data = await run_in_threadpool(account_trading_service.status)
         account = await repo.ensure_account(status_data.get("account") or {})
+        if require_live and account.account_type != "live":
+            raise HTTPException(status_code=400, detail={"message": "未选择账户时只能跟随同花顺实盘账户。", "type": "unsupported_account_type"})
     if account.account_type == "live":
         await repo.update_runtime_status(account, status_data)
     return repo, account, status_data
@@ -446,13 +458,15 @@ async def get_trades(
 @router.post("/order", response_model=ApiResponse)
 async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db)):
     try:
-        if payload.mode == "paper":
-            if not payload.account_id:
-                raise HTTPException(status_code=400, detail={"message": "模拟下单必须选择模拟账户。", "type": "account_required"})
+        if payload.account_id:
             repo = AccountTradingRepository(db)
             account = await get_managed_account(repo, payload.account_id)
-            if account.account_type != "paper":
-                raise HTTPException(status_code=400, detail={"message": "当前选择的账户不是模拟账户。", "type": "unsupported_account_type"})
+            selected_engine = engine_label(account.account_type)
+        else:
+            repo, account, _ = await get_account_context(db, None, require_live=True)
+            selected_engine = engine_label(account.account_type)
+
+        if account.account_type == "paper":
             task = await repo.create_task(
                 account,
                 payload.side,
@@ -461,7 +475,8 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
                     "side": payload.side,
                     "price": str(payload.price),
                     "quantity": payload.quantity,
-                    "mode": payload.mode,
+                    "mode": account.account_type,
+                    "engine": selected_engine,
                     "account_id": payload.account_id,
                     "idempotency_key": payload.idempotency_key,
                     "remark": payload.remark,
@@ -479,7 +494,37 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
             await repo.finish_task(task, "success", data)
             return ok(data, "模拟委托已按委托价立即成交")
 
-        repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        if account.account_type == "backtest":
+            task = await repo.create_task(
+                account,
+                payload.side,
+                {
+                    "symbol": payload.symbol,
+                    "side": payload.side,
+                    "price": str(payload.price),
+                    "quantity": payload.quantity,
+                    "mode": account.account_type,
+                    "engine": selected_engine,
+                    "account_id": payload.account_id,
+                    "idempotency_key": payload.idempotency_key,
+                    "remark": payload.remark,
+                },
+            )
+            error = RuntimeError("回测交易引擎需要绑定 backtest_run、策略和历史行情上下文，暂不支持从交易台手工下单。")
+            await repo.finish_task(task, "failed", {"engine": selected_engine}, error)
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": str(error),
+                    "type": "backtest_engine_requires_run",
+                    "engine": selected_engine,
+                },
+            )
+
+        if account.account_type != "live":
+            raise HTTPException(status_code=400, detail={"message": "当前账户类型暂不支持交易台下单。", "type": "unsupported_account_type"})
+        if payload.account_id:
+            repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
         task = await repo.create_task(
             account,
             payload.side,
@@ -488,7 +533,8 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
                 "side": payload.side,
                 "price": str(payload.price),
                 "quantity": payload.quantity,
-                "mode": payload.mode,
+                "mode": account.account_type,
+                "engine": selected_engine,
                 "account_id": payload.account_id,
                 "idempotency_key": payload.idempotency_key,
                 "remark": payload.remark,
@@ -644,14 +690,17 @@ async def sync_account(payload: SyncRequest | None = None, db: AsyncSession = De
         if payload.account_id:
             repo = AccountTradingRepository(db)
             account = await get_managed_account(repo, payload.account_id)
-            if account.account_type != "live":
+            if account.account_type == "paper":
+                refreshed = await repo.refresh_paper_market_value(account)
                 data = {
-                    "balance": await repo.get_latest_balance(account),
-                    "positions": await repo.list_latest_positions(account),
+                    "balance": refreshed["balance"],
+                    "positions": refreshed["positions"],
                     "orders": await repo.list_order_records(account, "today"),
                     "trades": await repo.list_trade_records(account, "today"),
                 }
                 return ok(data, "账户数据已获取")
+            if account.account_type != "live":
+                raise HTTPException(status_code=400, detail={"message": "当前账户类型暂不支持交易台同步。", "type": "unsupported_account_type"})
         repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
         task = await repo.create_task(
             account,
@@ -678,5 +727,20 @@ async def sync_account(payload: SyncRequest | None = None, db: AsyncSession = De
             },
         )
         return ok(data, "账户数据已同步")
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.post("/paper/refresh-market-value", response_model=ApiResponse)
+async def refresh_paper_market_value(payload: SyncRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        if not payload.account_id:
+            raise HTTPException(status_code=400, detail={"message": "刷新模拟持仓市值必须选择模拟账户。", "type": "account_required"})
+        repo = AccountTradingRepository(db)
+        account = await get_managed_account(repo, payload.account_id)
+        if account.account_type != "paper":
+            raise HTTPException(status_code=400, detail={"message": "当前选择的账户不是模拟账户。", "type": "unsupported_account_type"})
+        data = await repo.refresh_paper_market_value(account)
+        return ok(data, "模拟账户持仓市值和资金快照已刷新")
     except Exception as exc:
         raise_api_error(exc)

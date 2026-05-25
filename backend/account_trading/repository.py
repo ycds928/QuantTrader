@@ -27,6 +27,7 @@ from .models import (
     PaperTrade,
     TradingAccount,
 )
+from .paper_engine import PaperOrderRequest, PaperTradingEngine
 
 
 def _now() -> datetime:
@@ -209,6 +210,50 @@ class AccountTradingRepository:
             for row in latest_by_symbol.values()
             if int(row.quantity or 0) > 0
         ]
+
+    async def refresh_paper_market_value(self, account: TradingAccount) -> dict[str, Any]:
+        if account.account_type != "paper":
+            raise ValueError("当前账户不是模拟账户")
+        positions = await self._latest_paper_position_rows(account)
+        latest_balance = await self._latest_paper_balance_snapshot(account)
+        cash_balance = Decimal(str(latest_balance.cash_balance)) if latest_balance else _decimal((account.meta_json or {}).get("initial_cash"))
+        if not positions:
+            balance = await self._save_paper_balance_snapshot(
+                account,
+                cash_balance=cash_balance,
+                market_value=Decimal("0"),
+                total_asset=cash_balance,
+                raw={"event": "paper_market_value_refresh", "positions": 0},
+            )
+            return {"balance": balance, "positions": []}
+
+        engine = PaperTradingEngine()
+        quotes = await engine.market_data.get_quotes([row.symbol for row in positions])
+        refreshed: list[dict[str, Any]] = []
+        for row in positions:
+            quote = quotes.get(row.symbol)
+            last_price = quote.last_price if quote else Decimal(str(row.last_price or row.cost_price or "0"))
+            await self._upsert_paper_position_snapshot(
+                account,
+                symbol=row.symbol,
+                quantity=int(row.quantity or 0),
+                cost_price=Decimal(str(row.cost_price or "0")),
+                last_price=last_price,
+                raw={
+                    "event": "paper_market_value_refresh",
+                    "quote": self._quote_payload(quote) if quote else None,
+                },
+            )
+        refreshed = await self.list_latest_positions(account)
+        market_value = sum(_decimal(item.get("market_value")) for item in refreshed)
+        balance = await self._save_paper_balance_snapshot(
+            account,
+            cash_balance=cash_balance,
+            market_value=market_value,
+            total_asset=cash_balance + market_value,
+            raw={"event": "paper_market_value_refresh", "positions": len(refreshed)},
+        )
+        return {"balance": balance, "positions": refreshed}
 
     async def create_account(self, payload: dict[str, Any]) -> dict[str, Any]:
         account = TradingAccount(
@@ -979,20 +1024,18 @@ class AccountTradingRepository:
 
         now = _now()
         trade_date = _today()
-        amount = price * Decimal(quantity)
         latest_balance = await self._latest_paper_balance_snapshot(account)
         cash_balance = Decimal(str(latest_balance.cash_balance)) if latest_balance else _decimal((account.meta_json or {}).get("initial_cash"))
         current_position = await self._latest_paper_position_snapshot(account, symbol)
         current_quantity = int(current_position.quantity or 0) if current_position else 0
         current_cost_price = Decimal(str(current_position.cost_price or "0")) if current_position else Decimal("0")
-
-        if side == "buy" and cash_balance < amount:
-            raise ValueError(f"模拟账户可用资金不足，需要 {amount}，当前 {cash_balance}")
-        if side == "sell" and current_quantity < quantity:
-            raise ValueError(f"模拟账户可卖持仓不足，需要 {quantity}，当前 {current_quantity}")
+        decision = await PaperTradingEngine().match_order(
+            PaperOrderRequest(symbol=symbol, side=side, price=price, quantity=quantity),  # type: ignore[arg-type]
+            available_cash=cash_balance,
+            available_quantity=current_quantity,
+        )
 
         order_no = f"PORD-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
-        trade_no = f"PTRD-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
         broker_order_no = f"PMOCK-{uuid4().hex[:12].upper()}"
         order = PaperOrder(
             account_id=account.id,
@@ -1004,98 +1047,107 @@ class AccountTradingRepository:
             side=side,
             price=price,
             quantity=quantity,
-            filled_quantity=quantity,
+            filled_quantity=decision.fill_quantity,
             canceled_quantity=0,
-            avg_fill_price=price,
-            status="filled",
+            avg_fill_price=decision.fill_price if decision.fill_quantity else None,
+            status=decision.status,
             remark=remark,
             source="paper",
             submitted_at=now,
-            accepted_at=now,
+            accepted_at=now if decision.status != "rejected" else None,
+            rejected_at=now if decision.status == "rejected" else None,
             raw_json={
-                "engine": "immediate_fill",
+                "engine": "paper_trading_engine",
                 "idempotency_key": idempotency_key,
                 "remark": remark,
+                "match": self._decision_payload(decision),
             },
         )
         self.db.add(order)
         await self.db.flush()
 
-        trade = PaperTrade(
-            account_id=account.id,
-            order_id=order.id,
-            trade_id=trade_no,
-            broker_trade_no=trade_no,
-            broker_order_no=broker_order_no,
-            trade_date=trade_date,
-            traded_at=now,
-            symbol=symbol,
-            side=side,
-            price=price,
-            quantity=quantity,
-            amount=amount,
-            commission=Decimal("0"),
-            stamp_tax=Decimal("0"),
-            transfer_fee=Decimal("0"),
-            raw_json={"engine": "immediate_fill"},
-        )
-        self.db.add(trade)
+        trade: PaperTrade | None = None
+        balance = await self.get_latest_balance(account)
+        if decision.is_filled:
+            trade_no = f"PTRD-{now.strftime('%Y%m%d%H%M%S')}-{uuid4().hex[:8]}"
+            trade = PaperTrade(
+                account_id=account.id,
+                order_id=order.id,
+                trade_id=trade_no,
+                broker_trade_no=trade_no,
+                broker_order_no=broker_order_no,
+                trade_date=trade_date,
+                traded_at=now,
+                symbol=symbol,
+                side=side,
+                price=decision.fill_price,
+                quantity=decision.fill_quantity,
+                amount=decision.amount,
+                commission=decision.commission,
+                stamp_tax=decision.stamp_tax,
+                transfer_fee=decision.transfer_fee,
+                raw_json={"engine": "paper_trading_engine", "quote": self._quote_payload(decision.quote)},
+            )
+            self.db.add(trade)
 
-        if side == "buy":
-            new_quantity = current_quantity + quantity
-            new_cash = cash_balance - amount
-            previous_cost = current_cost_price * Decimal(current_quantity)
-            new_cost_price = (previous_cost + amount) / Decimal(new_quantity)
-        else:
-            new_quantity = current_quantity - quantity
-            new_cash = cash_balance + amount
-            new_cost_price = current_cost_price if new_quantity > 0 else Decimal("0")
+            if side == "buy":
+                new_quantity = current_quantity + decision.fill_quantity
+                new_cash = cash_balance - decision.amount - decision.total_fee
+                previous_cost = current_cost_price * Decimal(current_quantity)
+                new_cost_price = (previous_cost + decision.amount + decision.total_fee) / Decimal(new_quantity)
+            else:
+                new_quantity = current_quantity - decision.fill_quantity
+                new_cash = cash_balance + decision.amount - decision.total_fee
+                new_cost_price = current_cost_price if new_quantity > 0 else Decimal("0")
 
-        await self._upsert_paper_position_snapshot(
-            account,
-            symbol=symbol,
-            quantity=new_quantity,
-            cost_price=new_cost_price,
-            last_price=price,
-            raw={
-                "event": "paper_immediate_fill",
-                "side": side,
-                "price": str(price),
-                "quantity": quantity,
-                "order_no": order_no,
-                "trade_id": trade_no,
-            },
-        )
-        positions = await self.list_latest_positions(account)
-        market_value = sum(_decimal(item.get("market_value")) for item in positions)
-        balance = await self._save_paper_balance_snapshot(
-            account,
-            cash_balance=new_cash,
-            market_value=market_value,
-            total_asset=new_cash + market_value,
-            raw={
-                "event": "paper_immediate_fill",
-                "side": side,
-                "amount": str(amount),
-                "order_no": order_no,
-                "trade_id": trade_no,
-            },
-        )
+            await self._upsert_paper_position_snapshot(
+                account,
+                symbol=symbol,
+                quantity=new_quantity,
+                cost_price=new_cost_price,
+                last_price=decision.market_value_price,
+                raw={
+                    "event": "paper_engine_fill",
+                    "side": side,
+                    "fill_price": str(decision.fill_price),
+                    "fill_quantity": decision.fill_quantity,
+                    "order_no": order_no,
+                    "trade_id": trade_no,
+                    "quote": self._quote_payload(decision.quote),
+                },
+            )
+            positions = await self.list_latest_positions(account)
+            market_value = sum(_decimal(item.get("market_value")) for item in positions)
+            balance = await self._save_paper_balance_snapshot(
+                account,
+                cash_balance=new_cash,
+                market_value=market_value,
+                total_asset=new_cash + market_value,
+                raw={
+                    "event": "paper_engine_fill",
+                    "side": side,
+                    "amount": str(decision.amount),
+                    "total_fee": str(decision.total_fee),
+                    "order_no": order_no,
+                    "trade_id": trade_no,
+                },
+            )
         await self._append_order_status_log(
             account,
             order,
             None,
-            "filled",
-            "fill",
+            decision.status,
+            "fill" if decision.is_filled else decision.status,
             "paper_engine",
-            {"order_no": order_no, "trade_id": trade_no, "amount": str(amount)},
-            "模拟下单已按委托价立即成交",
+            {"order_no": order_no, "match": self._decision_payload(decision)},
+            decision.reason,
         )
         await self.db.flush()
         return {
-            "status": "filled",
+            "status": decision.status,
+            "reason": decision.reason,
             "order": self._serialize_order(order),
-            "trade": self._serialize_trade(trade),
+            "trade": self._serialize_trade(trade) if trade else None,
             "balance": balance,
             "positions": await self.list_latest_positions(account),
         }
@@ -1117,6 +1169,18 @@ class AccountTradingRepository:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def _latest_paper_position_rows(self, account: TradingAccount) -> list[PaperPositionSnapshot]:
+        result = await self.db.execute(
+            select(PaperPositionSnapshot)
+            .where(PaperPositionSnapshot.account_id == account.id)
+            .order_by(PaperPositionSnapshot.snapshot_time.desc(), PaperPositionSnapshot.id.desc())
+        )
+        latest_by_symbol: dict[str, PaperPositionSnapshot] = {}
+        for row in result.scalars().all():
+            if row.symbol not in latest_by_symbol and int(row.quantity or 0) > 0:
+                latest_by_symbol[row.symbol] = row
+        return list(latest_by_symbol.values())
 
     async def _upsert_paper_position_snapshot(
         self,
@@ -1241,6 +1305,36 @@ class AccountTradingRepository:
             "last_price": str(row.last_price or "0"),
             "market_value": str(row.market_value or "0"),
             "unrealized_pnl": str(row.unrealized_pnl or "0"),
+        }
+
+    def _quote_payload(self, quote: Any) -> dict[str, Any] | None:
+        if quote is None:
+            return None
+        return {
+            "symbol": quote.symbol,
+            "name": quote.name,
+            "exchange": quote.exchange,
+            "last_price": str(quote.last_price),
+            "limit_up": str(quote.limit_up) if quote.limit_up is not None else None,
+            "limit_down": str(quote.limit_down) if quote.limit_down is not None else None,
+            "volume": quote.volume,
+            "trading_status": quote.trading_status,
+            "timestamp": quote.timestamp.isoformat(sep=" ", timespec="seconds"),
+        }
+
+    def _decision_payload(self, decision: Any) -> dict[str, Any]:
+        return {
+            "status": decision.status,
+            "fill_price": str(decision.fill_price),
+            "fill_quantity": decision.fill_quantity,
+            "requested_quantity": decision.requested_quantity,
+            "amount": str(decision.amount),
+            "commission": str(decision.commission),
+            "stamp_tax": str(decision.stamp_tax),
+            "transfer_fee": str(decision.transfer_fee),
+            "total_fee": str(decision.total_fee),
+            "reason": decision.reason,
+            "quote": self._quote_payload(decision.quote),
         }
 
     def _serialize_order(self, row: LiveOrder | PaperOrder | BacktestOrder) -> dict[str, Any]:
