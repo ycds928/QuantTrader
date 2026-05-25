@@ -1,5 +1,116 @@
 # 账户与交易 + 复盘分析 永久存储与 API 说明
 
+## 0. 最终审核版建表结论
+
+> 本节是给团队审核的最终结果。后续章节作为字段说明、API 说明和设计依据。  
+> 对外 API 保持统一，数据库持久化必须按 `live` 实盘、`paper` 模拟盘、`backtest` 回测三类物理隔离。  
+> 文档禁止记录数据库连接串、密码、真实客户号、验证码图片路径等敏感信息。
+
+### 0.1 最终建表总名单
+
+第一批必须创建，这一批用于跑通账户管理、交易持久化、实盘自动化追踪的最小闭环：
+
+| 优先级 | 表名 | 类型 | 账户类型 | 主要用途 | 上游来源 | 下游消费者 |
+|---:|---|---|---|---|---|---|
+| P0 | `trading_account` | 公共主档 | live/paper/backtest | 统一保存账户主档、账户类型、展示名、状态 | 用户配置、同花顺识别、回测配置 | 账户页面、下单接口、复盘筛选 |
+| P0 | `account_binding` | 公共绑定 | live/paper/backtest | 保存账户与同花顺客户端、模拟适配器、回测引擎的绑定关系 | 用户配置、桌面自动化识别 | 自动连接、账户识别、状态检查 |
+| P0 | `account_runtime_status` | 公共状态 | live/paper/backtest | 保存账户当前连接状态、同步状态、最后错误、最近心跳 | 交易适配器、模拟撮合器、回测引擎 | 前端状态栏、监控告警 |
+| P0 | `account_operation_task` | 公共任务 | live/paper/backtest | 保存一次同步、查询、下单、撤单、回测运行等完整业务任务 | Web 请求、策略信号、定时任务 | 操作日志、问题定位、审计 |
+| P0 | `account_operation_step` | 公共步骤 | live/paper/backtest | 保存任务内每一步操作，例如连接客户端、切换菜单、填代码、点买入、读取委托结果 | 桌面自动化适配器、模拟撮合器、回测引擎 | 实盘自动化排错、操作审计 |
+| P0 | `live_balance_snapshot` | 实盘事实 | live | 保存实盘资金快照 | 同花顺资金股票页面 | 账户首页、风控、复盘 |
+| P0 | `live_position_snapshot` | 实盘事实 | live | 保存实盘持仓快照 | 同花顺资金股票页面 | 账户首页、风控、复盘 |
+| P0 | `live_order` | 实盘事实 | live | 保存实盘委托、合同编号、撤单状态 | 同花顺当日委托/历史委托、Web 下单 | 订单列表、撤单、复盘 |
+| P0 | `live_trade` | 实盘事实 | live | 保存实盘成交明细 | 同花顺当日成交/历史成交 | 成交列表、复盘、绩效计算 |
+| P0 | `live_order_status_log` | 实盘状态流 | live | 保存实盘订单状态变化轨迹 | 下单、同步委托、撤单、成交回查 | 订单追踪、审计、复盘解释 |
+| P0 | `paper_balance_snapshot` | 模拟事实 | paper | 保存模拟盘资金快照 | 本地模拟撮合、上游实时行情 | 账户首页、策略执行、复盘 |
+| P0 | `paper_position_snapshot` | 模拟事实 | paper | 保存模拟盘持仓快照 | 本地模拟撮合、上游实时行情 | 账户首页、策略执行、复盘 |
+| P0 | `paper_order` | 模拟事实 | paper | 保存模拟盘委托 | Web 手工下单、策略信号、本地撮合 | 订单列表、撤单、复盘 |
+| P0 | `paper_trade` | 模拟事实 | paper | 保存模拟盘成交 | 本地撮合引擎 | 成交列表、复盘、绩效计算 |
+| P0 | `paper_order_status_log` | 模拟状态流 | paper | 保存模拟订单状态变化 | 本地撮合、撤单、行情触发 | 订单追踪、复盘解释 |
+| P0 | `backtest_run` | 回测批次 | backtest | 保存一次回测的策略、参数、区间、初始资金、状态 | 回测启动请求、策略模块 | 回测结果页、复盘入口 |
+| P0 | `backtest_balance_snapshot` | 回测事实 | backtest | 保存回测资金曲线基础快照 | 回测引擎 | 净值曲线、复盘指标 |
+| P0 | `backtest_position_snapshot` | 回测事实 | backtest | 保存回测持仓快照 | 回测引擎 | 持仓分析、复盘 |
+| P0 | `backtest_order` | 回测事实 | backtest | 保存回测委托 | 回测撮合引擎、历史行情 | 回测明细、复盘 |
+| P0 | `backtest_trade` | 回测事实 | backtest | 保存回测成交 | 回测撮合引擎、历史行情 | 回测明细、复盘、指标 |
+| P0 | `backtest_order_status_log` | 回测状态流 | backtest | 保存回测订单状态变化 | 回测撮合引擎 | 回测追踪、复盘解释 |
+
+第二批建议创建，这一批用于补齐资金流水、模拟批次、复盘指标和图表：
+
+| 优先级 | 表名 | 类型 | 账户类型 | 主要用途 | 上游来源 | 下游消费者 |
+|---:|---|---|---|---|---|---|
+| P1 | `live_cash_flow` | 实盘流水 | live | 保存实盘现金流水、费用、税费、冻结解冻 | 同花顺、成交计算 | 对账、复盘、收益归因 |
+| P1 | `paper_cash_flow` | 模拟流水 | paper | 保存模拟盘现金流水和费用 | 本地模拟撮合 | 对账、复盘、收益归因 |
+| P1 | `backtest_cash_flow` | 回测流水 | backtest | 保存回测现金流水和费用 | 回测引擎 | 对账、复盘、收益归因 |
+| P1 | `paper_simulation_run` | 模拟批次 | paper | 保存一次模拟运行的参数、资金、行情源、撮合规则 | 模拟盘启动配置 | 模拟盘结果复盘、策略对比 |
+| P1 | `review_session` | 复盘主表 | live/paper/backtest | 保存一次复盘分析任务 | 用户发起、回测结束、定时任务 | 复盘页面、报告导出 |
+| P1 | `review_metric_snapshot` | 复盘指标 | live/paper/backtest | 保存收益率、最大回撤、胜率、盈亏比等指标 | 复盘计算引擎 | 复盘报告、策略对比 |
+| P1 | `review_trade_item` | 复盘明细 | live/paper/backtest | 保存复盘后的交易明细、盈亏、持仓周期、标签 | 订单表、成交表、行情表 | 交易归因、问题定位 |
+| P1 | `review_equity_curve` | 复盘曲线 | live/paper/backtest | 保存净值曲线、总资产曲线、收益曲线 | 资金快照、持仓估值、成交 | 图表展示、指标计算 |
+| P1 | `review_drawdown_curve` | 复盘曲线 | live/paper/backtest | 保存回撤曲线和峰值回撤区间 | 净值曲线计算 | 风险分析、复盘报告 |
+| P1 | `review_suggestion` | 复盘建议 | live/paper/backtest | 保存策略优化、风控、仓位、进出场建议 | 复盘分析引擎 | 复盘页面、团队确认 |
+
+第三批可选增强，后续根据团队排期决定：
+
+| 优先级 | 表名 | 类型 | 账户类型 | 主要用途 |
+|---:|---|---|---|---|
+| P2 | `account_sync_log` | 同步日志 | live/paper/backtest | 保存同步摘要日志。若 `account_operation_task` 已覆盖，可降级为视图或不建。 |
+| P2 | `market_data_ref_log` | 行情引用 | paper/backtest | 保存模拟和回测使用过的行情批次、K 线版本、数据源版本。 |
+| P2 | `risk_check_log` | 风控日志 | live/paper/backtest | 保存下单前后的风控检查结果。 |
+| P2 | `trade_reconcile_record` | 对账记录 | live/paper | 保存本地订单成交与交易端读取结果的对账差异。 |
+| P2 | `review_tag` | 复盘标签 | live/paper/backtest | 保存用户给交易或复盘会话打的标签。 |
+| P2 | `review_note` | 复盘笔记 | live/paper/backtest | 保存人工复盘笔记、结论和团队确认意见。 |
+
+### 0.2 三类账户持久化边界
+
+实盘 `live_*`：
+
+- 只保存真实交易端或真实交易动作形成的数据。
+- 数据来源包括同花顺桌面自动化读取资金、持仓、委托、成交，以及 Web 触发的买入、卖出、撤单操作。
+- 不能用模拟撮合结果覆盖实盘订单状态。
+- 不能直接假定下单成功，必须以交易端委托记录或合同编号为准。
+- 验证码只作为运行时交互状态处理，不保存验证码截图文件路径。
+
+模拟盘 `paper_*`：
+
+- 不操作同花顺软件。
+- 数据来源是上游实时行情、本地模拟撮合、Web 手工下单、策略信号。
+- 允许重置或删除模拟批次，但不能影响实盘表。
+- 必须记录委托、成交、资金、持仓和订单状态流转，保证复盘口径与实盘一致。
+
+回测 `backtest_*`：
+
+- 数据来源是上游历史行情、策略信号和回测撮合引擎。
+- 所有回测事实表必须带 `run_id`，通过 `backtest_run.run_id` 隔离每一次回测任务。
+- 回测数据量大，后续清理、归档、重算都应以 `run_id` 为单位。
+- 回测结果不能写入 `paper_*` 或 `live_*`。
+
+### 0.3 关键新增表说明
+
+旧版设计已有 `live_*`、`paper_*`、`backtest_*` 三套交易表族，方向正确，但还不足以满足当前“所有交易记录持久化、三类账户独立、实盘自动化可追溯”的要求。最终必须补充以下表：
+
+1. `account_runtime_status`：记录账户当前可用性、连接状态、最近同步状态、最后错误、最近心跳。
+2. `account_operation_task`：记录一次完整业务动作，例如同步、查询余额、下单、撤单、回测运行。
+3. `account_operation_step`：记录自动化或撮合过程中的每一步，实盘下单尤其需要它定位问题。
+4. `live_order_status_log`、`paper_order_status_log`、`backtest_order_status_log`：记录订单状态变化历史，不能只在订单主表保留最终状态。
+5. `paper_simulation_run`：模拟盘如果需要按批次复盘、重置或对比，应单独建表。
+6. `review_equity_curve`、`review_drawdown_curve`：复盘图表和风险指标需要曲线型结果表。
+
+### 0.4 上下游接口关系
+
+账户交易模块需要上游市场数据提供：`symbol`、`name`、`exchange`、`trade_date`、`latest_price`、`prev_close`、`limit_up`、`limit_down`、`is_halted`、`bar_time`、`open`、`high`、`low`、`close`、`volume`、`amount`。
+
+| 下游模块 | 读取表 | 读取目的 |
+|---|---|---|
+| 前端账户页面 | `trading_account`、三类 `*_balance_snapshot`、`*_position_snapshot`、`*_order`、`*_trade` | 展示账户、资金、持仓、委托、成交 |
+| 策略执行模块 | `trading_account`、`account_runtime_status`、三类订单和持仓表 | 判断账户可用性、仓位、委托状态 |
+| 风控模块 | 三类资金、持仓、订单、成交表、`risk_check_log` | 下单前检查、盘中风险监控 |
+| 复盘模块 | 三类订单、成交、资金、持仓表、`review_*` | 计算收益、回撤、胜率、盈亏比、交易归因 |
+| 历史回放模块 | `backtest_run`、`backtest_*`、`review_*` | 回放历史交易过程和复盘结果 |
+
+### 0.5 最终审核判断
+
+当前数据库设计应按本节的 P0、P1、P2 三档推进。P0 是本阶段必须落地的表，否则无法满足“交易记录全部持久化、账户状态可监控、实盘自动化过程可追踪”的要求。P1 是复盘和资金对账真正可用所需的表。P2 是后续工程化增强项，可以在基础交易闭环稳定后继续补。
+
 > 适用模块：`backend/account_trading`、`backend/review_analysis`  
 > 目标：把实盘 / 模拟 / 回测三类账户统一进一套永久存储模型，并抽出可供上下游复用的公共 API 与数据结构。
 
@@ -61,7 +172,7 @@ CREATE DATABASE IF NOT EXISTS quant_trading
 - 账户连接与识别
 - 资金、持仓、委托、成交同步
 - 买入、卖出、撤单
-- 自动化状态、日志、验证码截图
+- 自动化状态、日志、验证码运行时处理
 - 账户持久化与快照写入
 
 不负责：
@@ -404,7 +515,6 @@ CREATE TABLE account_sync_log (
     status VARCHAR(32) NOT NULL,
     message VARCHAR(255) NOT NULL,
     detail_json JSON DEFAULT NULL,
-    screenshot_path VARCHAR(255) DEFAULT NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     INDEX idx_operation_time (operation, created_at),
     INDEX idx_account_time (account_id, created_at)
@@ -858,7 +968,6 @@ trading_account
 | `status` | `VARCHAR(32)` | 是 | 后端 service | 结果：`success`、`failed`、`captcha_required`、`client_not_ready`。 |
 | `message` | `VARCHAR(255)` | 是 | 后端 service | 简短错误或成功说明。 |
 | `detail_json` | `JSON` | 否 | 后端 service | 结构化上下文，例如请求参数、异常类型、返回结果摘要。 |
-| `screenshot_path` | `VARCHAR(255)` | 否 | 自动化适配器 | 验证码、弹窗、失败截图路径。 |
 | `created_at` | `DATETIME(3)` | 是 | 数据库 | 日志时间。 |
 
 ### 10.9 `review_session`

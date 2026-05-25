@@ -3,11 +3,15 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
+from common.dependencies import get_db
+
 from .adapters.ths_desktop import CaptchaRequiredError, TradingClientNotReadyError
+from .repository import AccountTradingRepository
 from .service import account_trading_service
 
 
@@ -17,6 +21,9 @@ router = APIRouter(prefix="/api/account", tags=["账户与交易"])
 OrderSide = Literal["buy", "sell"]
 AccountMode = Literal["live", "paper"]
 OrderScope = Literal["today", "history"]
+ManagedAccountType = Literal["live", "paper", "backtest"]
+ManagedAccountStatus = Literal["active", "inactive", "archived"]
+BindingType = Literal["desktop", "ths", "webapi", "mock", "backtest"]
 
 
 class ApiResponse(BaseModel):
@@ -25,12 +32,49 @@ class ApiResponse(BaseModel):
     message: str = ""
 
 
+class AccountManageRequest(BaseModel):
+    account_code: str | None = Field(default=None, max_length=64)
+    account_name: str = Field(..., min_length=1, max_length=128)
+    account_type: ManagedAccountType
+    broker_name: str | None = Field(default=None, max_length=64)
+    broker_account_no: str | None = Field(default=None, max_length=64)
+    shareholder_account: str | None = Field(default=None, max_length=64)
+    exchange: str | None = Field(default=None, max_length=16)
+    status: ManagedAccountStatus = "active"
+    is_default: bool = False
+    binding_type: BindingType | None = None
+    client_path: str | None = Field(default=None, max_length=255)
+    client_identity: str | None = Field(default=None, max_length=128)
+    binding_active: bool = True
+    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟账户初始资金")
+    meta_json: dict[str, Any] | None = None
+
+
+class AccountUpdateRequest(BaseModel):
+    account_code: str | None = Field(default=None, max_length=64)
+    account_name: str | None = Field(default=None, min_length=1, max_length=128)
+    account_type: ManagedAccountType | None = None
+    broker_name: str | None = Field(default=None, max_length=64)
+    broker_account_no: str | None = Field(default=None, max_length=64)
+    shareholder_account: str | None = Field(default=None, max_length=64)
+    exchange: str | None = Field(default=None, max_length=16)
+    status: ManagedAccountStatus | None = None
+    is_default: bool | None = None
+    binding_type: BindingType | None = None
+    client_path: str | None = Field(default=None, max_length=255)
+    client_identity: str | None = Field(default=None, max_length=128)
+    binding_active: bool | None = None
+    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟账户初始资金")
+    meta_json: dict[str, Any] | None = None
+
+
 class OrderRequest(BaseModel):
     symbol: str = Field(..., min_length=6, max_length=12, description="证券代码")
     side: OrderSide
     price: Decimal = Field(..., gt=0, description="限价委托价格")
     quantity: int = Field(..., gt=0, description="委托股数")
     mode: AccountMode = "live"
+    account_id: int | None = Field(default=None, gt=0, description="前端选择的交易账户ID")
     idempotency_key: str | None = Field(default=None, max_length=80)
     remark: str | None = Field(default=None, max_length=200)
     wait_manual_captcha: bool = True
@@ -51,11 +95,13 @@ class OrderRequest(BaseModel):
 
 
 class CancelRequest(BaseModel):
+    account_id: int | None = Field(default=None, gt=0, description="前端选择的交易账户ID")
     wait_manual_captcha: bool = True
     manual_captcha_timeout: int = Field(default=180, ge=30, le=600)
 
 
 class SyncRequest(BaseModel):
+    account_id: int | None = Field(default=None, gt=0, description="前端选择的交易账户ID")
     wait_manual_captcha: bool = True
     manual_captcha_timeout: int = Field(default=180, ge=30, le=600)
 
@@ -65,12 +111,13 @@ def ok(data: Any, message: str = "ok") -> ApiResponse:
 
 
 def raise_api_error(exc: Exception) -> None:
+    if isinstance(exc, HTTPException):
+        raise exc
     if isinstance(exc, CaptchaRequiredError):
         raise HTTPException(
             status_code=409,
             detail={
                 "message": "检测到验证码弹窗，请在同花顺中人工处理后重试，或启用等待人工验证码。",
-                "captcha_path": str(exc.screenshot),
             },
         ) from exc
     if isinstance(exc, TradingClientNotReadyError):
@@ -84,10 +131,162 @@ def raise_api_error(exc: Exception) -> None:
     raise HTTPException(status_code=500, detail={"message": str(exc), "type": type(exc).__name__}) from exc
 
 
+def normalize_account_no(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isalnum())
+
+
+def is_masked_account_no(value: Any) -> bool:
+    return "*" in str(value or "")
+
+
+def assert_desktop_account_matches(selected_account: Any, status_data: dict[str, Any]) -> None:
+    status_account = status_data.get("account") or {}
+    selected_capital_raw = getattr(selected_account, "broker_account_no", None)
+    current_capital_raw = status_account.get("capital_account")
+    selected_holder_raw = getattr(selected_account, "shareholder_account", None)
+    current_holder_raw = status_account.get("shareholder_account")
+    selected_capital = normalize_account_no(selected_capital_raw)
+    current_capital = normalize_account_no(current_capital_raw)
+    selected_holder = normalize_account_no(selected_holder_raw)
+    current_holder = normalize_account_no(current_holder_raw)
+
+    if (
+        selected_capital
+        and current_capital
+        and not is_masked_account_no(selected_capital_raw)
+        and not is_masked_account_no(current_capital_raw)
+        and selected_capital != current_capital
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "当前选择的账户与同花顺已登录资金账号不一致，请切换账户或重新登录同花顺后再操作。",
+                "type": "account_mismatch",
+            },
+        )
+    if (
+        selected_holder
+        and current_holder
+        and not is_masked_account_no(selected_holder_raw)
+        and not is_masked_account_no(current_holder_raw)
+        and selected_holder != current_holder
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "当前选择的账户与同花顺已登录股东账号不一致，请切换账户或重新登录同花顺后再操作。",
+                "type": "account_mismatch",
+            },
+        )
+
+
+async def get_account_context(
+    db: AsyncSession,
+    account_id: int | None = None,
+    require_live: bool = False,
+) -> tuple[AccountTradingRepository, Any, dict[str, Any]]:
+    repo = AccountTradingRepository(db)
+    if account_id:
+        account = await repo.get_account(account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail={"message": "选择的账户不存在。", "type": "account_not_found"})
+        if account.status == "archived":
+            raise HTTPException(status_code=400, detail={"message": "选择的账户已归档，不能用于交易。", "type": "account_archived"})
+        if require_live and account.account_type != "live":
+            raise HTTPException(status_code=400, detail={"message": "当前桌面适配器只支持实盘账户交易。", "type": "unsupported_account_type"})
+        status_data: dict[str, Any] = {}
+        if account.account_type == "live":
+            status_data = await run_in_threadpool(account_trading_service.status)
+            assert_desktop_account_matches(account, status_data)
+    else:
+        status_data = await run_in_threadpool(account_trading_service.status)
+        account = await repo.ensure_account(status_data.get("account") or {})
+    if account.account_type == "live":
+        await repo.update_runtime_status(account, status_data)
+    return repo, account, status_data
+
+
+async def get_managed_account(repo: AccountTradingRepository, account_id: int) -> Any:
+    account = await repo.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail={"message": "选择的账户不存在。", "type": "account_not_found"})
+    if account.status == "archived":
+        raise HTTPException(status_code=400, detail={"message": "选择的账户已归档，不能用于查询。", "type": "account_archived"})
+    return account
+
+
+@router.get("/accounts", response_model=ApiResponse)
+async def list_accounts(db: AsyncSession = Depends(get_db)):
+    repo = AccountTradingRepository(db)
+    data = await repo.list_accounts()
+    return ok(data, "账户列表已获取")
+
+
+@router.post("/accounts", response_model=ApiResponse)
+async def create_account(payload: AccountManageRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        repo = AccountTradingRepository(db)
+        data = await repo.create_account(payload.model_dump(exclude_unset=True))
+        return ok(data, "账户已创建")
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.put("/accounts/{account_id}", response_model=ApiResponse)
+async def update_account(account_id: int, payload: AccountUpdateRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        repo = AccountTradingRepository(db)
+        data = await repo.update_account(account_id, payload.model_dump(exclude_unset=True))
+        return ok(data, "账户已更新")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={"message": str(exc), "type": "account_not_found"}) from exc
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.post("/accounts/{account_id}/default", response_model=ApiResponse)
+async def set_default_account(account_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        repo = AccountTradingRepository(db)
+        data = await repo.set_default_account(account_id)
+        return ok(data, "默认账户已更新")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={"message": str(exc), "type": "account_not_found"}) from exc
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.post("/accounts/{account_id}/archive", response_model=ApiResponse)
+async def archive_account(account_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        repo = AccountTradingRepository(db)
+        data = await repo.archive_account(account_id)
+        return ok(data, "账户已归档")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={"message": str(exc), "type": "account_not_found"}) from exc
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.delete("/accounts/{account_id}", response_model=ApiResponse)
+async def delete_account(account_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        repo = AccountTradingRepository(db)
+        data = await repo.archive_account(account_id)
+        return ok(data, "账户已删除")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail={"message": str(exc), "type": "account_not_found"}) from exc
+    except Exception as exc:
+        raise_api_error(exc)
+
+
 @router.get("/automation/status", response_model=ApiResponse)
-async def automation_status():
+async def automation_status(db: AsyncSession = Depends(get_db)):
     try:
         data = await run_in_threadpool(account_trading_service.status)
+        repo = AccountTradingRepository(db)
+        account = await repo.ensure_account(data.get("account") or {})
+        await repo.update_runtime_status(account, data)
         return ok(data, "同花顺连接状态已获取")
     except Exception as exc:
         raise_api_error(exc)
@@ -100,16 +299,34 @@ async def automation_logs(limit: int = Query(default=50, ge=1, le=200)):
 
 @router.get("/balance", response_model=ApiResponse)
 async def get_balance(
+    account_id: int | None = Query(default=None, gt=0),
     wait_manual_captcha: bool = False,
     manual_captcha_timeout: int = Query(default=120, ge=30, le=600),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
+        repo = AccountTradingRepository(db)
+        if account_id:
+            account = await get_managed_account(repo, account_id)
+            if account.account_type != "live":
+                data = await repo.get_latest_balance(account)
+                return ok(data, "账户余额已获取")
+            repo, account, _ = await get_account_context(db, account_id, require_live=True)
+        else:
+            repo, account, _ = await get_account_context(db)
+        task = await repo.create_task(
+            account,
+            "query_balance",
+            {"wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
+        )
         data = await run_in_threadpool(
             account_trading_service.balance,
             None,
             wait_manual_captcha,
             manual_captcha_timeout,
         )
+        await repo.save_balance(account, data)
+        await repo.finish_task(task, "success", data)
         return ok(data, "账户余额已同步")
     except Exception as exc:
         raise_api_error(exc)
@@ -117,16 +334,34 @@ async def get_balance(
 
 @router.get("/positions", response_model=ApiResponse)
 async def get_positions(
+    account_id: int | None = Query(default=None, gt=0),
     wait_manual_captcha: bool = False,
     manual_captcha_timeout: int = Query(default=120, ge=30, le=600),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
+        repo = AccountTradingRepository(db)
+        if account_id:
+            account = await get_managed_account(repo, account_id)
+            if account.account_type != "live":
+                data = await repo.list_latest_positions(account)
+                return ok(data, "持仓列表已获取")
+            repo, account, _ = await get_account_context(db, account_id, require_live=True)
+        else:
+            repo, account, _ = await get_account_context(db)
+        task = await repo.create_task(
+            account,
+            "query_positions",
+            {"wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
+        )
         data = await run_in_threadpool(
             account_trading_service.positions,
             None,
             wait_manual_captcha,
             manual_captcha_timeout,
         )
+        await repo.save_positions(account, data)
+        await repo.finish_task(task, "success", {"count": len(data)})
         return ok(data, "持仓列表已同步")
     except Exception as exc:
         raise_api_error(exc)
@@ -135,17 +370,36 @@ async def get_positions(
 @router.get("/orders", response_model=ApiResponse)
 async def get_orders(
     scope: OrderScope = "today",
+    account_id: int | None = Query(default=None, gt=0),
     wait_manual_captcha: bool = False,
     manual_captcha_timeout: int = Query(default=120, ge=30, le=600),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
-        data = await run_in_threadpool(
-            account_trading_service.orders,
-            scope,
-            None,
-            wait_manual_captcha,
-            manual_captcha_timeout,
+        repo = AccountTradingRepository(db)
+        if account_id:
+            account = await get_managed_account(repo, account_id)
+            if account.account_type == "live":
+                repo, account, _ = await get_account_context(db, account_id, require_live=True)
+        else:
+            repo, account, _ = await get_account_context(db)
+        task = await repo.create_task(
+            account,
+            "query_orders",
+            {"scope": scope, "wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
+        if account.account_type == "live":
+            data = await run_in_threadpool(
+                account_trading_service.orders,
+                scope,
+                None,
+                wait_manual_captcha,
+                manual_captcha_timeout,
+            )
+            await repo.save_orders(account, data)
+        else:
+            data = await repo.list_order_records(account, scope)
+        await repo.finish_task(task, "success", {"count": len(data), "scope": scope, "account_id": account.id})
         return ok(data, "委托列表已同步")
     except Exception as exc:
         raise_api_error(exc)
@@ -154,27 +408,92 @@ async def get_orders(
 @router.get("/trades", response_model=ApiResponse)
 async def get_trades(
     scope: OrderScope = "today",
+    account_id: int | None = Query(default=None, gt=0),
     wait_manual_captcha: bool = False,
     manual_captcha_timeout: int = Query(default=120, ge=30, le=600),
+    db: AsyncSession = Depends(get_db),
 ):
     try:
-        data = await run_in_threadpool(
-            account_trading_service.trades,
-            scope,
-            None,
-            wait_manual_captcha,
-            manual_captcha_timeout,
+        repo = AccountTradingRepository(db)
+        if account_id:
+            account = await get_managed_account(repo, account_id)
+            if account.account_type == "live":
+                repo, account, _ = await get_account_context(db, account_id, require_live=True)
+        else:
+            repo, account, _ = await get_account_context(db)
+        task = await repo.create_task(
+            account,
+            "query_trades",
+            {"scope": scope, "wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
+        if account.account_type == "live":
+            data = await run_in_threadpool(
+                account_trading_service.trades,
+                scope,
+                None,
+                wait_manual_captcha,
+                manual_captcha_timeout,
+            )
+            await repo.save_trades(account, data)
+        else:
+            data = await repo.list_trade_records(account, scope)
+        await repo.finish_task(task, "success", {"count": len(data), "scope": scope, "account_id": account.id})
         return ok(data, "成交列表已同步")
     except Exception as exc:
         raise_api_error(exc)
 
 
 @router.post("/order", response_model=ApiResponse)
-async def place_order(payload: OrderRequest):
-    if payload.mode != "live":
-        raise HTTPException(status_code=400, detail={"message": "当前桌面适配器只实现 live 实盘模式。"})
+async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db)):
     try:
+        if payload.mode == "paper":
+            if not payload.account_id:
+                raise HTTPException(status_code=400, detail={"message": "模拟下单必须选择模拟账户。", "type": "account_required"})
+            repo = AccountTradingRepository(db)
+            account = await get_managed_account(repo, payload.account_id)
+            if account.account_type != "paper":
+                raise HTTPException(status_code=400, detail={"message": "当前选择的账户不是模拟账户。", "type": "unsupported_account_type"})
+            task = await repo.create_task(
+                account,
+                payload.side,
+                {
+                    "symbol": payload.symbol,
+                    "side": payload.side,
+                    "price": str(payload.price),
+                    "quantity": payload.quantity,
+                    "mode": payload.mode,
+                    "account_id": payload.account_id,
+                    "idempotency_key": payload.idempotency_key,
+                    "remark": payload.remark,
+                },
+            )
+            data = await repo.place_paper_order(
+                account,
+                side=payload.side,
+                symbol=payload.symbol,
+                price=payload.price,
+                quantity=payload.quantity,
+                idempotency_key=payload.idempotency_key,
+                remark=payload.remark,
+            )
+            await repo.finish_task(task, "success", data)
+            return ok(data, "模拟委托已按委托价立即成交")
+
+        repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        task = await repo.create_task(
+            account,
+            payload.side,
+            {
+                "symbol": payload.symbol,
+                "side": payload.side,
+                "price": str(payload.price),
+                "quantity": payload.quantity,
+                "mode": payload.mode,
+                "account_id": payload.account_id,
+                "idempotency_key": payload.idempotency_key,
+                "remark": payload.remark,
+            },
+        )
         data = await run_in_threadpool(
             account_trading_service.place_order,
             side=payload.side,
@@ -186,15 +505,79 @@ async def place_order(payload: OrderRequest):
             idempotency_key=payload.idempotency_key,
             remark=payload.remark,
         )
+        await repo.save_place_order_result(account, data)
+        await repo.save_trades(account, data.get("matched_trades") or [])
+        await repo.save_balance(account, data.get("balance_after") or {})
+        confirmation_input = {
+            "entrust_no": data.get("entrust_no") or (data.get("action_result") or {}).get("entrust_no"),
+            "symbol": payload.symbol,
+            "side": payload.side,
+            "price": str(payload.price),
+            "quantity": payload.quantity,
+        }
+        try:
+            confirmation = await run_in_threadpool(
+                account_trading_service.confirm_order,
+                entrust_no=confirmation_input["entrust_no"],
+                symbol=payload.symbol,
+                side=payload.side,
+                price=payload.price,
+                quantity=payload.quantity,
+                wait_manual_captcha=payload.wait_manual_captcha,
+                manual_captcha_timeout=payload.manual_captcha_timeout,
+            )
+            data["confirmation"] = confirmation
+            await repo.save_order_confirmation(
+                account,
+                confirmation,
+                event_type="order_confirm",
+                event_message="下单后订单确认回查完成",
+            )
+            await repo.save_balance(account, confirmation.get("balance") or {})
+            await repo.append_task_step(
+                task,
+                "confirm_order",
+                "success" if confirmation.get("confirmed") else "failed",
+                confirmation_input,
+                {
+                    "confirmed": confirmation.get("confirmed"),
+                    "final_status": confirmation.get("final_status"),
+                    "matched_orders": len(confirmation.get("matched_orders") or []),
+                    "matched_trades": len(confirmation.get("matched_trades") or []),
+                    "errors": confirmation.get("errors") or [],
+                },
+                None if confirmation.get("confirmed") else "订单未能在当日委托或成交中确认",
+            )
+        except Exception as confirm_exc:
+            data["confirmation"] = {
+                "confirmed": False,
+                "final_status": "confirmation_failed",
+                "errors": [str(confirm_exc)],
+            }
+            await repo.append_task_step(
+                task,
+                "confirm_order",
+                "failed",
+                confirmation_input,
+                data["confirmation"],
+                str(confirm_exc),
+            )
+        await repo.finish_task(task, "success", data)
         return ok(data, "委托流程已执行，请以返回的合同编号、当日委托或成交回报为准")
     except Exception as exc:
         raise_api_error(exc)
 
 
 @router.post("/order/{entrust_no}/cancel", response_model=ApiResponse)
-async def cancel_order(entrust_no: str, payload: CancelRequest | None = None):
+async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db: AsyncSession = Depends(get_db)):
     payload = payload or CancelRequest()
     try:
+        repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        task = await repo.create_task(
+            account,
+            "cancel",
+            {"entrust_no": entrust_no, "wait_manual_captcha": payload.wait_manual_captcha},
+        )
         data = await run_in_threadpool(
             account_trading_service.cancel_order,
             entrust_no,
@@ -202,20 +585,97 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None):
             payload.wait_manual_captcha,
             payload.manual_captcha_timeout,
         )
+        await repo.save_cancel_result(account, entrust_no, data)
+        await repo.save_balance(account, data.get("balance_after") or {})
+        confirmation_input = {"entrust_no": entrust_no}
+        try:
+            confirmation = await run_in_threadpool(
+                account_trading_service.confirm_order,
+                entrust_no=entrust_no,
+                wait_manual_captcha=payload.wait_manual_captcha,
+                manual_captcha_timeout=payload.manual_captcha_timeout,
+            )
+            data["confirmation"] = confirmation
+            await repo.save_order_confirmation(
+                account,
+                confirmation,
+                event_type="cancel_confirm",
+                event_message="撤单后订单确认回查完成",
+            )
+            await repo.save_balance(account, confirmation.get("balance") or {})
+            await repo.append_task_step(
+                task,
+                "confirm_cancel",
+                "success" if confirmation.get("confirmed") else "failed",
+                confirmation_input,
+                {
+                    "confirmed": confirmation.get("confirmed"),
+                    "final_status": confirmation.get("final_status"),
+                    "matched_orders": len(confirmation.get("matched_orders") or []),
+                    "matched_trades": len(confirmation.get("matched_trades") or []),
+                    "errors": confirmation.get("errors") or [],
+                },
+                None if confirmation.get("confirmed") else "撤单结果未能在当日委托中确认",
+            )
+        except Exception as confirm_exc:
+            data["confirmation"] = {
+                "confirmed": False,
+                "final_status": "confirmation_failed",
+                "errors": [str(confirm_exc)],
+            }
+            await repo.append_task_step(
+                task,
+                "confirm_cancel",
+                "failed",
+                confirmation_input,
+                data["confirmation"],
+                str(confirm_exc),
+            )
+        await repo.finish_task(task, "success", data)
         return ok(data, "撤单流程已执行，请以当日委托状态为准")
     except Exception as exc:
         raise_api_error(exc)
 
 
 @router.post("/sync", response_model=ApiResponse)
-async def sync_account(payload: SyncRequest | None = None):
+async def sync_account(payload: SyncRequest | None = None, db: AsyncSession = Depends(get_db)):
     payload = payload or SyncRequest()
     try:
+        if payload.account_id:
+            repo = AccountTradingRepository(db)
+            account = await get_managed_account(repo, payload.account_id)
+            if account.account_type != "live":
+                data = {
+                    "balance": await repo.get_latest_balance(account),
+                    "positions": await repo.list_latest_positions(account),
+                    "orders": await repo.list_order_records(account, "today"),
+                    "trades": await repo.list_trade_records(account, "today"),
+                }
+                return ok(data, "账户数据已获取")
+        repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        task = await repo.create_task(
+            account,
+            "sync",
+            {"wait_manual_captcha": payload.wait_manual_captcha, "manual_captcha_timeout": payload.manual_captcha_timeout},
+        )
         data = await run_in_threadpool(
             account_trading_service.sync,
             None,
             payload.wait_manual_captcha,
             payload.manual_captcha_timeout,
+        )
+        await repo.save_balance(account, data.get("balance") or {})
+        await repo.save_positions(account, data.get("positions") or [])
+        await repo.save_orders(account, data.get("orders") or [])
+        await repo.save_trades(account, data.get("trades") or [])
+        await repo.finish_task(
+            task,
+            "success",
+            {
+                "positions": len(data.get("positions") or []),
+                "orders": len(data.get("orders") or []),
+                "trades": len(data.get("trades") or []),
+            },
         )
         return ok(data, "账户数据已同步")
     except Exception as exc:

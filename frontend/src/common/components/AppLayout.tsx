@@ -3,7 +3,8 @@ import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
   Activity,
-  Wallet,
+  UserCog,
+  ArrowLeftRight,
   Brain,
   MonitorPlay,
   ChartBar,
@@ -19,7 +20,8 @@ import { cn } from '@/common/utils'
 const navItems = [
   { href: '/', label: '首页', icon: LayoutDashboard },
   { href: '/api-data', label: '行情数据', icon: Activity },
-  { href: '/account', label: '账户交易', icon: Wallet },
+  { href: '/account/manage', label: '账户管理', icon: UserCog },
+  { href: '/account/trading', label: '交易界面', icon: ArrowLeftRight },
   { href: '/strategies', label: '策略管理', icon: Brain },
   { href: '/execution', label: '执行监控', icon: MonitorPlay },
   { href: '/review', label: '复盘分析', icon: ChartBar },

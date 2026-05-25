@@ -27,9 +27,8 @@ OrderSide = Literal["buy", "sell"]
 
 
 class CaptchaRequiredError(RuntimeError):
-    def __init__(self, screenshot: Path) -> None:
-        super().__init__(f"检测到验证码弹窗，截图已保存: {screenshot}")
-        self.screenshot = screenshot
+    def __init__(self, message: str = "检测到验证码弹窗，请在同花顺中人工处理后继续。") -> None:
+        super().__init__(message)
 
 
 class TradingClientNotReadyError(RuntimeError):
@@ -84,19 +83,14 @@ class ThsDesktopAdapter:
         "资金帐户": str,
         "发生日期": str,
     }
-    DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parents[3] / "docs" / "ths-desktop-adapter"
-
     def __init__(
         self,
         client_path: str | Path,
-        artifacts_dir: str | Path | None = None,
         captcha_code: str | None = None,
         wait_manual_captcha: bool = False,
         manual_captcha_timeout: int = 120,
     ) -> None:
         self.client_path = Path(client_path)
-        self.artifacts_dir = Path(artifacts_dir) if artifacts_dir else self.DEFAULT_ARTIFACTS_DIR
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.captcha_code = captcha_code
         self.wait_manual_captcha = wait_manual_captcha
         self.manual_captcha_timeout = manual_captcha_timeout
@@ -233,10 +227,9 @@ class ThsDesktopAdapter:
                     ).window_text()
                 )
             except ElementNotFoundError as exc:
-                screenshot = self.capture_main("trade-page-not-ready.png")
                 raise TradingClientNotReadyError(
                     "未找到资金余额控件，通常表示同花顺交易端尚未登录、连接已断开，"
-                    f"或当前未进入“查询-资金股票”页面。截图已保存: {screenshot}"
+                    "或当前未进入“查询-资金股票”页面。"
                 ) from exc
         return result
 
@@ -290,12 +283,8 @@ class ThsDesktopAdapter:
         ).wrapper_object().click()
         time.sleep(0.8)
 
-        popups_before = self.capture_process_popups("order-popup-before")
         action_result = self.handle_pop_dialogs()
-        popups_after = self.capture_process_popups("order-popup-after")
         verification = self.verify_order(request, action_result)
-        verification["popup_screenshots_before"] = popups_before
-        verification["popup_screenshots_after"] = popups_after
         return verification
 
     def cancel_order(self, entrust_no: str | None = None) -> dict[str, Any]:
@@ -321,9 +310,8 @@ class ThsDesktopAdapter:
             if self._is_page_ready_for_path(path):
                 time.sleep(sleep_seconds)
                 return
-            screenshot = self.capture_main("menu-switch-failed.png")
             raise TradingClientNotReadyError(
-                f"无法切换同花顺菜单 {'/'.join(path)}。交易端可能未登录或仍在启动页。截图已保存: {screenshot}"
+                f"无法切换同花顺菜单 {'/'.join(path)}。交易端可能未登录或仍在启动页。"
             ) from exc
         try:
             main.type_keys("{F5}")
@@ -396,19 +384,17 @@ class ThsDesktopAdapter:
     def _assert_trade_page_ready(self) -> None:
         if self._is_trade_page_ready():
             return
-        screenshot = self.capture_main("trade-client-login-required.png")
         raise TradingClientNotReadyError(
             "同花顺交易客户端已启动，但还没有进入已登录的交易界面。"
-            f"请先在同花顺中完成登录/连接后重试。截图已保存: {screenshot}"
+            "请先在同花顺中完成登录/连接后重试。"
         )
 
-    def fill_trade_form(self, request: ThsOrderRequest) -> Path:
+    def fill_trade_form(self, request: ThsOrderRequest) -> None:
         self.type_by_wm_char(self.TRADE_SECURITY_CONTROL_ID, request.symbol[-6:])
         time.sleep(0.6)
         self.type_by_wm_char(self.TRADE_PRICE_CONTROL_ID, f"{request.price:.2f}")
         self.type_by_wm_char(self.TRADE_AMOUNT_CONTROL_ID, str(int(request.quantity)))
         time.sleep(0.5)
-        return self.capture_main("filled-order-form.png")
 
     def type_by_wm_char(self, control_id: int, text: str, clear_first: bool = True) -> None:
         _, main = self.ensure_connected()
@@ -490,7 +476,6 @@ class ThsDesktopAdapter:
                 "status": "failed",
                 "method": "direct_cancel_button",
                 "message": "未找到可见的撤单按钮",
-                "screenshot": str(self.capture_main("cancel-button-not-found.png")),
             }
 
         target.click()
@@ -502,7 +487,6 @@ class ThsDesktopAdapter:
             "method": "direct_cancel_button",
             "dialog_result": dialog_result,
             "balance_after": self.safe_balance(),
-            "screenshot": str(self.capture_main("after-direct-cancel.png")),
         }
 
     def handle_pop_dialogs(self) -> dict[str, Any]:
@@ -535,7 +519,6 @@ class ThsDesktopAdapter:
                 self._click_confirm(dialog)
                 return {"message": content}
 
-            self.capture_window(dialog, f"unknown-dialog-{int(time.time())}.png")
             try:
                 dialog.close()
             except Exception:
@@ -605,43 +588,6 @@ class ThsDesktopAdapter:
         except Exception as exc:
             return {"error": f"{type(exc).__name__}: {exc}"}
 
-    def capture_main(self, filename: str) -> Path:
-        _, main = self.ensure_connected()
-        return self.capture_window(main, filename)
-
-    def capture_window(self, window: Any, filename: str) -> Path:
-        path = self.artifacts_dir / filename
-        path.parent.mkdir(parents=True, exist_ok=True)
-        window.capture_as_image().save(path)
-        return path.resolve()
-
-    def capture_process_popups(self, stage: str) -> list[str]:
-        app, main = self.ensure_connected()
-        process_id = app.process
-        screenshots: list[str] = []
-        keywords = ("提示", "确认", "验证码", "委托", "安全")
-        for index, window in enumerate(Desktop(backend="win32").windows()):
-            try:
-                _, window_pid = win32process.GetWindowThreadProcessId(window.handle)
-            except Exception:
-                continue
-            if window_pid != process_id or window.handle == main.handle:
-                continue
-            rect = window.rectangle()
-            if rect.width() <= 20 or rect.height() <= 20:
-                continue
-            title = window.window_text() or "untitled"
-            try:
-                children_text = " ".join(child.window_text() or "" for child in window.children())
-            except Exception:
-                children_text = ""
-            if not any(k in title or k in children_text for k in keywords):
-                continue
-            safe_title = "".join(ch if ch.isalnum() else "_" for ch in title)[:32]
-            path = self.capture_window(window, f"{stage}-{index}-{safe_title}.png")
-            screenshots.append(str(path))
-        return screenshots
-
     def _find_grid(self):
         _, main = self.ensure_connected()
         candidates = []
@@ -686,20 +632,18 @@ class ThsDesktopAdapter:
             return False
 
         if self._is_captcha_dialog(top):
-            screenshot = self.capture_window(top, f"captcha-{int(time.time())}.png")
             if self.captcha_code:
                 self._submit_captcha_dialog(top, self.captcha_code)
             elif self.wait_manual_captcha:
                 print(
-                    f"检测到验证码弹窗，截图已保存: {screenshot}\n"
-                    f"请在同花顺验证码弹窗中手动输入验证码并点击确定，脚本将在最多 "
-                    f"{self.manual_captcha_timeout} 秒内等待弹窗关闭后继续。",
+                    f"检测到验证码弹窗，请在同花顺中手动输入验证码并点击确定，"
+                    f"脚本将在最多 {self.manual_captcha_timeout} 秒内等待弹窗关闭后继续。",
                     file=sys.stderr,
                     flush=True,
                 )
                 self._wait_for_dialog_closed(top, self.manual_captcha_timeout)
             else:
-                raise CaptchaRequiredError(screenshot)
+                raise CaptchaRequiredError()
             time.sleep(0.8)
             return True
         return False

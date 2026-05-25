@@ -2,11 +2,15 @@ import { AppLayout } from '@/common/components'
 import request from '@/common/utils/request'
 import {
   Activity,
+  Archive,
   Ban,
   ClipboardList,
   Loader2,
+  Pencil,
+  Plus,
   RefreshCcw,
   ShieldCheck,
+  Star,
   Wallet,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -86,6 +90,32 @@ type AccountInfo = {
   capital_account: string
 }
 
+type AccountBinding = {
+  id: number
+  binding_type: string
+  client_path: string | null
+  client_identity: string | null
+  is_active: boolean
+  last_connected_at: string | null
+}
+
+type ManagedAccount = {
+  id: number
+  account_code: string
+  account_name: string
+  account_type: 'live' | 'paper' | 'backtest'
+  broker_name: string | null
+  broker_account_no: string | null
+  shareholder_account: string | null
+  exchange: string | null
+  status: 'active' | 'inactive' | 'archived'
+  is_default: boolean
+  meta_json: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+  bindings: AccountBinding[]
+}
+
 type AutomationLog = {
   id: string
   operation: string
@@ -101,6 +131,8 @@ const inputClass =
   'h-10 w-full rounded-md border border-outline bg-surface-container px-3 text-sm text-on-surface outline-none transition-colors placeholder:text-on-surface-variant focus:border-primary'
 
 export default function Account() {
+  const [accounts, setAccounts] = useState<ManagedAccount[]>([])
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null)
   const [balance, setBalance] = useState<Balance | null>(null)
   const [positions, setPositions] = useState<Position[]>([])
   const [orders, setOrders] = useState<OrderRow[]>([])
@@ -112,6 +144,23 @@ export default function Account() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [waitCaptcha, setWaitCaptcha] = useState(true)
+  const [accountForm, setAccountForm] = useState({
+    account_code: '',
+    account_name: '',
+    account_type: 'live' as 'live' | 'paper' | 'backtest',
+    broker_name: '同花顺',
+    broker_account_no: '',
+    shareholder_account: '',
+    exchange: '',
+    status: 'active' as 'active' | 'inactive' | 'archived',
+    is_default: true,
+    binding_type: 'desktop',
+    client_path: '',
+    client_identity: '',
+    binding_active: true,
+    initial_cash: '',
+    meta_json_text: '',
+  })
   const [orderForm, setOrderForm] = useState({
     side: 'buy' as 'buy' | 'sell',
     symbol: '301183',
@@ -124,6 +173,11 @@ export default function Account() {
   const busyLabel = useMemo(() => {
     if (!busy) return ''
     return {
+      accounts: '刷新账户',
+      account_create: '创建账户',
+      account_update: '更新账户',
+      account_archive: '归档账户',
+      account_default: '设置默认账户',
       status: '检查连接',
       balance: '同步资金',
       positions: '同步持仓',
@@ -137,6 +191,7 @@ export default function Account() {
   }, [busy])
 
   useEffect(() => {
+    void refreshAccounts()
     void refreshStatus()
     void refreshLogs()
   }, [])
@@ -153,8 +208,7 @@ export default function Account() {
     } catch (err: any) {
       const detail = err?.response?.data?.detail
       const text = detail?.message || err?.message || '请求失败'
-      const captchaPath = detail?.captcha_path ? ` 验证码截图：${detail.captcha_path}` : ''
-      setError(`${text}${captchaPath}`)
+      setError(text)
       await refreshLogs(false)
       return null
     } finally {
@@ -167,6 +221,124 @@ export default function Account() {
       request.get('/account/automation/status', { timeout: apiTimeout }) as Promise<ApiResponse<AutomationStatus>>
     )
     if (data) setStatus(data)
+  }
+
+  async function refreshAccounts() {
+    const data = await callApi<ManagedAccount[]>('accounts', () =>
+      request.get('/account/accounts', { timeout: apiTimeout }) as Promise<ApiResponse<ManagedAccount[]>>
+    )
+    if (data) setAccounts(data)
+  }
+
+  function resetAccountForm() {
+    setEditingAccountId(null)
+    setAccountForm({
+      account_code: '',
+      account_name: '',
+      account_type: 'live',
+      broker_name: '同花顺',
+      broker_account_no: '',
+      shareholder_account: '',
+      exchange: '',
+      status: 'active',
+      is_default: true,
+      binding_type: 'desktop',
+      client_path: '',
+      client_identity: '',
+      binding_active: true,
+      initial_cash: '',
+      meta_json_text: '',
+    })
+  }
+
+  function editAccount(account: ManagedAccount) {
+    const binding = account.bindings?.[0]
+    setEditingAccountId(account.id)
+    setAccountForm({
+      account_code: account.account_code || '',
+      account_name: account.account_name || '',
+      account_type: account.account_type,
+      broker_name: account.broker_name || '',
+      broker_account_no: account.broker_account_no || '',
+      shareholder_account: account.shareholder_account || '',
+      exchange: account.exchange || '',
+      status: account.status,
+      is_default: account.is_default,
+      binding_type: binding?.binding_type || (account.account_type === 'live' ? 'desktop' : 'mock'),
+      client_path: binding?.client_path || '',
+      client_identity: binding?.client_identity || '',
+      binding_active: binding?.is_active ?? true,
+      initial_cash: String(account.meta_json?.initial_cash || ''),
+      meta_json_text: JSON.stringify(account.meta_json || {}, null, 2),
+    })
+  }
+
+  function fillAccountFromStatus() {
+    if (!status?.account) return
+    const currentAccount = status.account
+    setAccountForm((prev) => ({
+      ...prev,
+      account_name: currentAccount.account_name || prev.account_name,
+      account_type: currentAccount.account_type === 'unknown' ? prev.account_type : currentAccount.account_type,
+      broker_name: '同花顺',
+      broker_account_no: currentAccount.capital_account || prev.broker_account_no,
+      shareholder_account: currentAccount.shareholder_account || prev.shareholder_account,
+      exchange: currentAccount.market || prev.exchange,
+      binding_type: currentAccount.account_type === 'paper' ? 'mock' : 'desktop',
+    }))
+  }
+
+  async function submitAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    let metaJson: Record<string, unknown> | undefined
+    if (accountForm.meta_json_text.trim()) {
+      try {
+        metaJson = JSON.parse(accountForm.meta_json_text)
+      } catch {
+        setError('账户扩展信息必须是合法 JSON')
+        return
+      }
+    }
+    const payload = {
+      account_code: accountForm.account_code.trim() || undefined,
+      account_name: accountForm.account_name.trim(),
+      account_type: accountForm.account_type,
+      broker_name: accountForm.broker_name.trim() || undefined,
+      broker_account_no: accountForm.broker_account_no.trim() || undefined,
+      shareholder_account: accountForm.shareholder_account.trim() || undefined,
+      exchange: accountForm.exchange.trim() || undefined,
+      status: accountForm.status,
+      is_default: accountForm.is_default,
+      binding_type: accountForm.binding_type,
+      client_path: accountForm.client_path.trim() || undefined,
+      client_identity: accountForm.client_identity.trim() || undefined,
+      binding_active: accountForm.binding_active,
+      initial_cash: accountForm.account_type === 'paper' && accountForm.initial_cash.trim() ? accountForm.initial_cash.trim() : undefined,
+      meta_json: metaJson,
+    }
+    const data = await callApi<ManagedAccount>(editingAccountId ? 'account_update' : 'account_create', () =>
+      (editingAccountId
+        ? request.put(`/account/accounts/${editingAccountId}`, payload, { timeout: apiTimeout })
+        : request.post('/account/accounts', payload, { timeout: apiTimeout })) as Promise<ApiResponse<ManagedAccount>>
+    )
+    if (data) {
+      await refreshAccounts()
+      resetAccountForm()
+    }
+  }
+
+  async function archiveAccount(accountId: number) {
+    const data = await callApi<ManagedAccount>('account_archive', () =>
+      request.post(`/account/accounts/${accountId}/archive`, {}, { timeout: apiTimeout }) as Promise<ApiResponse<ManagedAccount>>
+    )
+    if (data) await refreshAccounts()
+  }
+
+  async function setDefaultAccount(accountId: number) {
+    const data = await callApi<ManagedAccount>('account_default', () =>
+      request.post(`/account/accounts/${accountId}/default`, {}, { timeout: apiTimeout }) as Promise<ApiResponse<ManagedAccount>>
+    )
+    if (data) await refreshAccounts()
   }
 
   async function refreshBalance() {
@@ -330,6 +502,195 @@ export default function Account() {
             {error && <div className="text-error">{error}</div>}
           </div>
         )}
+
+        <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+          <section className="rounded-lg bg-surface-container-high p-4 shadow-card">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">{editingAccountId ? '编辑账户' : '新增账户'}</h2>
+              <div className="flex gap-2">
+                <ActionButton label="识别填充" icon={<ShieldCheck className="size-4" />} onClick={fillAccountFromStatus} />
+                <ActionButton label="清空" icon={<Plus className="size-4" />} onClick={resetAccountForm} />
+              </div>
+            </div>
+            <form className="space-y-3" onSubmit={submitAccount}>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="账户编码">
+                  <input
+                    value={accountForm.account_code}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, account_code: event.target.value }))}
+                    className={inputClass}
+                    placeholder="LIVE_THS_001"
+                  />
+                </Field>
+                <Field label="账户名称">
+                  <input
+                    value={accountForm.account_name}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, account_name: event.target.value }))}
+                    className={inputClass}
+                    placeholder="实盘主账户"
+                    required
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="账户类型">
+                  <select
+                    value={accountForm.account_type}
+                    onChange={(event) =>
+                      setAccountForm((prev) => ({
+                        ...prev,
+                        account_type: event.target.value as 'live' | 'paper' | 'backtest',
+                        binding_type: event.target.value === 'live' ? 'desktop' : 'mock',
+                      }))
+                    }
+                    className={inputClass}
+                  >
+                    <option value="live">实盘</option>
+                    <option value="paper">模拟盘</option>
+                    <option value="backtest">回测盘</option>
+                  </select>
+                </Field>
+                <Field label="状态">
+                  <select
+                    value={accountForm.status}
+                    onChange={(event) =>
+                      setAccountForm((prev) => ({ ...prev, status: event.target.value as 'active' | 'inactive' | 'archived' }))
+                    }
+                    className={inputClass}
+                  >
+                    <option value="active">启用</option>
+                    <option value="inactive">停用</option>
+                    <option value="archived">归档</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="券商/平台">
+                  <input
+                    value={accountForm.broker_name}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, broker_name: event.target.value }))}
+                    className={inputClass}
+                    placeholder="同花顺"
+                  />
+                </Field>
+                <Field label="交易市场">
+                  <input
+                    value={accountForm.exchange}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, exchange: event.target.value }))}
+                    className={inputClass}
+                    placeholder="SH/SZ/BJ"
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="资金账号">
+                  <input
+                    value={accountForm.broker_account_no}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, broker_account_no: event.target.value }))}
+                    className={inputClass}
+                    placeholder="资金账号"
+                  />
+                </Field>
+                <Field label="股东账号">
+                  <input
+                    value={accountForm.shareholder_account}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, shareholder_account: event.target.value }))}
+                    className={inputClass}
+                    placeholder="股东账号"
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="绑定类型">
+                  <select
+                    value={accountForm.binding_type}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, binding_type: event.target.value }))}
+                    className={inputClass}
+                  >
+                    <option value="desktop">桌面自动化</option>
+                    <option value="ths">同花顺</option>
+                    <option value="mock">模拟适配器</option>
+                    <option value="webapi">券商 API</option>
+                    <option value="backtest">回测引擎</option>
+                  </select>
+                </Field>
+                <Field label="客户端标识">
+                  <input
+                    value={accountForm.client_identity}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, client_identity: event.target.value }))}
+                    className={inputClass}
+                    placeholder="ths:LIVE_THS_001"
+                  />
+                </Field>
+              </div>
+              <Field label="客户端路径">
+                <input
+                  value={accountForm.client_path}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, client_path: event.target.value }))}
+                  className={inputClass}
+                  placeholder="E:\\同花顺软件\\同花顺\\xiadan.exe"
+                />
+              </Field>
+              {accountForm.account_type === 'paper' && (
+                <Field label="模拟初始资金">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={accountForm.initial_cash}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, initial_cash: event.target.value }))}
+                    className={`${inputClass} font-mono-num`}
+                    placeholder="1000000"
+                  />
+                </Field>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 rounded-md bg-surface-container px-3 py-2 text-sm text-on-surface-variant">
+                  <input
+                    type="checkbox"
+                    checked={accountForm.is_default}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, is_default: event.target.checked }))}
+                    className="size-4 accent-primary"
+                  />
+                  默认账户
+                </label>
+                <label className="flex items-center gap-2 rounded-md bg-surface-container px-3 py-2 text-sm text-on-surface-variant">
+                  <input
+                    type="checkbox"
+                    checked={accountForm.binding_active}
+                    onChange={(event) => setAccountForm((prev) => ({ ...prev, binding_active: event.target.checked }))}
+                    className="size-4 accent-primary"
+                  />
+                  绑定启用
+                </label>
+              </div>
+              <Field label="扩展信息 JSON">
+                <textarea
+                  value={accountForm.meta_json_text}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, meta_json_text: event.target.value }))}
+                  className="min-h-20 w-full rounded-md border border-outline bg-surface-container px-3 py-2 text-sm text-on-surface outline-none transition-colors placeholder:text-on-surface-variant focus:border-primary"
+                  placeholder='{"tag":"main"}'
+                />
+              </Field>
+              <button
+                type="submit"
+                disabled={Boolean(busy)}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'account_create' || busy === 'account_update' ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                {editingAccountId ? '保存修改' : '创建账户'}
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-lg bg-surface-container-high p-4 shadow-card">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">账户列表</h2>
+              <ActionButton label="刷新账户" icon={<RefreshCcw className="size-4" />} onClick={refreshAccounts} />
+            </div>
+            <AccountTable rows={accounts} onEdit={editAccount} onArchive={archiveAccount} onDefault={setDefaultAccount} />
+          </section>
+        </div>
 
         <div className="grid gap-4 xl:grid-cols-4">
           <MetricCard label="总资产" value={money(balance?.total_asset)} icon={<Wallet className="size-5" />} />
@@ -534,6 +895,59 @@ function ActionButton({ label, icon, onClick }: { label: string; icon?: React.Re
   )
 }
 
+function AccountTable({
+  rows,
+  onEdit,
+  onArchive,
+  onDefault,
+}: {
+  rows: ManagedAccount[]
+  onEdit: (row: ManagedAccount) => void
+  onArchive: (accountId: number) => void
+  onDefault: (accountId: number) => void
+}) {
+  return (
+    <DataTable
+      empty="暂无账户"
+      headers={['编码', '名称', '类型', '状态', '默认', '绑定', '操作']}
+      rows={rows.map((row) => [
+        row.account_code,
+        row.account_name,
+        accountTypeLabel(row.account_type),
+        statusLabel(row.status),
+        row.is_default ? <span className="text-warning">是</span> : '-',
+        row.bindings?.[0]?.client_path || row.bindings?.[0]?.binding_type || '-',
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => onEdit(row)}
+            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-primary hover:bg-primary/10"
+          >
+            <Pencil className="size-3" />
+            编辑
+          </button>
+          <button
+            type="button"
+            onClick={() => onDefault(row.id)}
+            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-warning hover:bg-warning/10"
+          >
+            <Star className="size-3" />
+            设默认
+          </button>
+          <button
+            type="button"
+            onClick={() => onArchive(row.id)}
+            className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs text-error hover:bg-error/10"
+          >
+            <Archive className="size-3" />
+            归档
+          </button>
+        </div>,
+      ])}
+    />
+  )
+}
+
 function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <button
@@ -711,4 +1125,18 @@ function pnlClass(value?: string) {
   if (num > 0) return 'text-up'
   if (num < 0) return 'text-down'
   return 'text-on-surface'
+}
+
+function accountTypeLabel(value: string) {
+  if (value === 'live') return '实盘'
+  if (value === 'paper') return '模拟盘'
+  if (value === 'backtest') return '回测盘'
+  return value || '-'
+}
+
+function statusLabel(value: string) {
+  if (value === 'active') return '启用'
+  if (value === 'inactive') return '停用'
+  if (value === 'archived') return '归档'
+  return value || '-'
 }

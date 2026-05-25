@@ -171,6 +171,74 @@ class AccountTradingService:
             manual_captcha_timeout=manual_captcha_timeout,
         )
 
+    def confirm_order(
+        self,
+        *,
+        entrust_no: str | None = None,
+        symbol: str | None = None,
+        side: OrderSide | None = None,
+        price: Decimal | str | None = None,
+        quantity: int | None = None,
+        client_path: str | None = None,
+        wait_manual_captcha: bool = True,
+        manual_captcha_timeout: int = 180,
+    ) -> dict[str, Any]:
+        def work(adapter: ThsDesktopAdapter) -> dict[str, Any]:
+            errors: list[str] = []
+            orders: list[dict[str, Any]] = []
+            trades: list[dict[str, Any]] = []
+            balance: dict[str, Any] = {}
+
+            try:
+                orders = [
+                    order
+                    for row in adapter.get_today_orders()
+                    if self._row_has_value(row)
+                    for order in [self._normalize_order(row)]
+                    if order["broker_order_id"] or order["symbol"] or order["quantity"]
+                ]
+            except Exception as exc:
+                errors.append(f"orders: {type(exc).__name__}: {exc}")
+            try:
+                trades = [
+                    trade
+                    for row in adapter.get_today_trades()
+                    if self._row_has_value(row)
+                    for trade in [self._normalize_trade(row)]
+                    if trade["broker_trade_id"] or trade["symbol"] or trade["quantity"]
+                ]
+            except Exception as exc:
+                errors.append(f"trades: {type(exc).__name__}: {exc}")
+            try:
+                balance = self._normalize_balance(adapter.get_balance())
+            except Exception as exc:
+                errors.append(f"balance: {type(exc).__name__}: {exc}")
+
+            matched_orders = self._match_normalized_orders(orders, entrust_no, symbol, side, price, quantity)
+            matched_trades = self._match_normalized_trades(trades, entrust_no, symbol, side, price, quantity)
+            confirmed = bool(matched_orders or matched_trades)
+            final_status = self._confirmation_status(matched_orders, matched_trades, confirmed, errors)
+            return {
+                "confirmed": confirmed,
+                "final_status": final_status,
+                "entrust_no": entrust_no,
+                "matched_orders": matched_orders,
+                "matched_trades": matched_trades,
+                "orders": orders,
+                "trades": trades,
+                "balance": balance,
+                "errors": errors,
+                "checked_at": datetime.now().isoformat(timespec="seconds"),
+            }
+
+        return self._run(
+            "confirm_order",
+            client_path,
+            work,
+            wait_manual_captcha=wait_manual_captcha,
+            manual_captcha_timeout=manual_captcha_timeout,
+        )
+
     def sync(
         self,
         client_path: str | None = None,
@@ -231,7 +299,7 @@ class AccountTradingService:
             self._append_log(operation, "success", "操作完成", {"result": result})
             return result
         except CaptchaRequiredError as exc:
-            detail = {"captcha_path": str(exc.screenshot)}
+            detail = {"captcha_required": True}
             self._append_log(operation, "captcha_required", str(exc), detail)
             raise
         except Exception as exc:
@@ -328,6 +396,112 @@ class AccountTradingService:
             "source": "live",
             "raw": row,
         }
+
+    def _match_normalized_orders(
+        self,
+        rows: list[dict[str, Any]],
+        entrust_no: str | None,
+        symbol: str | None,
+        side: str | None,
+        price: Decimal | str | None,
+        quantity: int | None,
+    ) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in rows
+            if self._is_order_match(row, entrust_no, symbol, side, price, quantity)
+        ]
+
+    def _match_normalized_trades(
+        self,
+        rows: list[dict[str, Any]],
+        entrust_no: str | None,
+        symbol: str | None,
+        side: str | None,
+        price: Decimal | str | None,
+        quantity: int | None,
+    ) -> list[dict[str, Any]]:
+        return [
+            row
+            for row in rows
+            if self._is_trade_match(row, entrust_no, symbol, side, price, quantity)
+        ]
+
+    def _is_order_match(
+        self,
+        row: dict[str, Any],
+        entrust_no: str | None,
+        symbol: str | None,
+        side: str | None,
+        price: Decimal | str | None,
+        quantity: int | None,
+    ) -> bool:
+        if entrust_no and str(row.get("broker_order_id") or row.get("order_id") or "").strip() == str(entrust_no).strip():
+            return True
+        return self._is_symbol_side_qty_price_match(row, symbol, side, price, quantity)
+
+    def _is_trade_match(
+        self,
+        row: dict[str, Any],
+        entrust_no: str | None,
+        symbol: str | None,
+        side: str | None,
+        price: Decimal | str | None,
+        quantity: int | None,
+    ) -> bool:
+        if entrust_no and str(row.get("order_id") or "").strip() == str(entrust_no).strip():
+            return True
+        return self._is_symbol_side_qty_price_match(row, symbol, side, price, quantity, allow_partial_quantity=True)
+
+    def _is_symbol_side_qty_price_match(
+        self,
+        row: dict[str, Any],
+        symbol: str | None,
+        side: str | None,
+        price: Decimal | str | None,
+        quantity: int | None,
+        *,
+        allow_partial_quantity: bool = False,
+    ) -> bool:
+        if symbol and str(row.get("symbol") or "").strip() != str(symbol).strip():
+            return False
+        if side and str(row.get("side") or "").strip() != str(side).strip():
+            return False
+        if quantity:
+            row_quantity = self._int(row, "quantity")
+            if allow_partial_quantity:
+                if row_quantity <= 0 or row_quantity > quantity:
+                    return False
+            elif row_quantity != quantity:
+                return False
+        if price is not None:
+            expected = self._decimal_text(price)
+            actual = self._decimal_text(row.get("price"))
+            if actual != expected:
+                return False
+        return bool(symbol or side or quantity or price is not None)
+
+    def _confirmation_status(
+        self,
+        matched_orders: list[dict[str, Any]],
+        matched_trades: list[dict[str, Any]],
+        confirmed: bool,
+        errors: list[str],
+    ) -> str:
+        if matched_trades:
+            order = matched_orders[0] if matched_orders else {}
+            filled_quantity = self._int(order, "filled_quantity")
+            quantity = self._int(order, "quantity")
+            if quantity and filled_quantity and filled_quantity < quantity:
+                return "partial_filled"
+            if quantity and filled_quantity >= quantity:
+                return "filled"
+            return "filled"
+        if matched_orders:
+            return str(matched_orders[0].get("status") or "submitted")
+        if errors:
+            return "confirmation_failed"
+        return "unconfirmed"
 
     def _first(self, row: dict[str, Any], *keys: str) -> Any:
         for key in keys:
