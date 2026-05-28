@@ -141,6 +141,7 @@ export default function TradingDesk() {
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('positions')
   const [scope, setScope] = useState<Scope>('today')
   const [orders, setOrders] = useState<OrderRow[]>([])
+  const [selectedOrderKeys, setSelectedOrderKeys] = useState<string[]>([])
   const [trades, setTrades] = useState<TradeRow[]>([])
   const [logs, setLogs] = useState<AutomationLog[]>([])
   const [status, setStatus] = useState<AutomationStatus | null>(null)
@@ -177,6 +178,8 @@ export default function TradingDesk() {
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || null
   const selectedAccountTradeable = !selectedAccount || ['live', 'paper', 'backtest'].includes(selectedAccount.account_type)
   const selectedEngine = selectedAccount ? engineLabel(selectedAccount.account_type) : '桌面实盘引擎'
+  const cancellableOrders = orders.filter((row) => canCancelOrder(row, selectedAccount?.account_type, scope))
+  const selectedCancelableOrders = cancellableOrders.filter((row) => selectedOrderKeys.includes(orderKey(row)))
   const accountInfo = selectedAccount
     ? {
         name: selectedAccount.account_name,
@@ -288,6 +291,7 @@ export default function TradingDesk() {
       setBalance(data.balance)
       setPositions(data.positions)
       setOrders(data.orders)
+      setSelectedOrderKeys([])
       setTrades(data.trades)
     }
   }
@@ -312,6 +316,7 @@ export default function TradingDesk() {
       setBalance(data.balance)
       setPositions(data.positions)
       setOrders(data.orders || [])
+      setSelectedOrderKeys([])
       setTrades(data.trades || [])
       setScope('today')
     }
@@ -329,7 +334,12 @@ export default function TradingDesk() {
         timeout: apiTimeout,
       }) as Promise<ApiResponse<OrderRow[]>>
     )
-    if (data) setOrders(data)
+    if (data) {
+      setOrders(data)
+      setSelectedOrderKeys((current) =>
+        current.filter((key) => data.some((row) => orderKey(row) === key && canCancelOrder(row, selectedAccount?.account_type, nextScope)))
+      )
+    }
   }
 
   async function refreshTrades(nextScope = scope) {
@@ -426,6 +436,7 @@ export default function TradingDesk() {
     setBalance(null)
     setPositions([])
     setOrders([])
+    setSelectedOrderKeys([])
     setTrades([])
     setMessage('')
     setError('')
@@ -456,10 +467,71 @@ export default function TradingDesk() {
       ) as Promise<ApiResponse<Record<string, unknown>>>
     )
     if (data) {
+      setMessage(`已提交撤单请求：合同编号 ${entrustNo}。请以同步后的当日委托状态为准。`)
       await refreshOrders('today')
       await refreshTrades('today')
       await refreshLogs(false)
     }
+  }
+
+  async function cancelSelectedOrders() {
+    if (!selectedCancelableOrders.length) {
+      setError('请先勾选可以撤单的当日委托记录。')
+      return
+    }
+    const entrustNos = selectedCancelableOrders.map((row) => row.broker_order_id || row.order_id).filter(Boolean)
+    const confirmed = window.confirm(`确认撤销已选中的 ${entrustNos.length} 笔委托吗？\n${entrustNos.join('、')}`)
+    if (!confirmed) return
+    for (const entrustNo of entrustNos) {
+      await callApi<Record<string, unknown>>('cancel', () =>
+        request.post(
+          `/account/order/${encodeURIComponent(entrustNo)}/cancel`,
+          {
+            account_id: selectedAccountId || undefined,
+            wait_manual_captcha: waitCaptcha,
+            manual_captcha_timeout: 180,
+          },
+          { timeout: apiTimeout }
+        ) as Promise<ApiResponse<Record<string, unknown>>>
+      )
+    }
+    setMessage(`已提交 ${entrustNos.length} 笔撤单请求。请以同步后的当日委托状态为准。`)
+    setSelectedOrderKeys([])
+    await refreshOrders('today')
+    await refreshTrades('today')
+    await refreshLogs(false)
+  }
+
+  async function cancelAllOrders() {
+    if (selectedAccount && selectedAccount.account_type !== 'live') {
+      setError('当前账户引擎暂不支持在交易台撤单。')
+      return
+    }
+    const confirmText = window.prompt('全部撤销会撤掉当前实盘账户所有可撤委托。请输入“全部撤销”确认。')
+    if (confirmText !== '全部撤销') return
+    const data = await callApi<Record<string, unknown>>('cancel', () =>
+      request.post(
+        '/account/orders/cancel-all',
+        {
+          account_id: selectedAccountId || undefined,
+          wait_manual_captcha: waitCaptcha,
+          manual_captcha_timeout: 180,
+        },
+        { timeout: apiTimeout }
+      ) as Promise<ApiResponse<Record<string, unknown>>>
+    )
+    if (data) {
+      setMessage('已提交全部撤单请求。请以同步后的当日委托状态为准。')
+      setSelectedOrderKeys([])
+      await refreshOrders('today')
+      await refreshTrades('today')
+      await refreshLogs(false)
+    }
+  }
+
+  function toggleOrderSelection(row: OrderRow, checked: boolean) {
+    const key = orderKey(row)
+    setSelectedOrderKeys((current) => checked ? Array.from(new Set([...current, key])) : current.filter((item) => item !== key))
   }
 
   return (
@@ -625,6 +697,22 @@ export default function TradingDesk() {
                     <TabButton active={scope === 'history'} label="历史" onClick={() => switchScope('history')} />
                   </div>
                 )}
+                {workspaceTab === 'orders' && scope === 'today' && selectedAccount?.account_type === 'live' && (
+                  <>
+                    <ActionButton
+                      label={`撤销已选${selectedCancelableOrders.length ? `(${selectedCancelableOrders.length})` : ''}`}
+                      icon={<Ban className="size-4" />}
+                      onClick={cancelSelectedOrders}
+                      disabled={!selectedCancelableOrders.length || Boolean(busy)}
+                    />
+                    <ActionButton
+                      label="全部撤销"
+                      icon={<Ban className="size-4" />}
+                      onClick={cancelAllOrders}
+                      disabled={!cancellableOrders.length || Boolean(busy)}
+                    />
+                  </>
+                )}
                 <ActionButton label="刷新" icon={<RefreshCcw className="size-4" />} onClick={refreshWorkspace} />
               </div>
             </div>
@@ -652,8 +740,15 @@ export default function TradingDesk() {
             {workspaceTab === 'orders' && (
               <DataTable
                 empty="暂无委托记录"
-                headers={['合同编号', '代码', '名称', '方向', '价格', '数量', '成交', '状态', '时间', '操作']}
+                headers={['选择', '合同编号', '代码', '名称', '方向', '价格', '数量', '成交', '状态', '时间', '操作']}
                 rows={orders.map((row) => [
+                  <input
+                    type="checkbox"
+                    checked={selectedOrderKeys.includes(orderKey(row))}
+                    disabled={!canCancelOrder(row, selectedAccount?.account_type, scope) || Boolean(busy)}
+                    onChange={(event) => toggleOrderSelection(row, event.target.checked)}
+                    className="size-4 accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                  />,
                   row.broker_order_id || row.order_id,
                   row.symbol,
                   row.name,
@@ -897,19 +992,23 @@ function canCancelOrder(row: OrderRow, accountType?: string, scope?: Scope) {
   return ['submitted', 'accepted', 'partial_filled', 'partial_canceled'].includes(normalizeOrderStatus(row.status))
 }
 
+function orderKey(row: OrderRow) {
+  return row.broker_order_id || row.order_id || `${row.symbol}-${row.submitted_at}-${row.price}-${row.quantity}`
+}
+
 function normalizeOrderStatus(status: string) {
   const value = String(status || 'submitted').toLowerCase()
-  if (['已提交未成交', '未成交', '已报', 'submitted', 'created'].some((item) => value.includes(item.toLowerCase()))) return 'submitted'
-  if (['部分成交', '部成', 'partial_filled'].some((item) => value.includes(item.toLowerCase()))) return 'partial_filled'
-  if (['全部成交', '已成', 'filled'].some((item) => value.includes(item.toLowerCase()))) return 'filled'
-  if (['部分撤单', '部撤', 'partial_canceled'].some((item) => value.includes(item.toLowerCase()))) return 'partial_canceled'
   if (['全部撤单', '已撤', 'canceled', 'cancelled'].some((item) => value.includes(item.toLowerCase()))) return 'canceled'
+  if (['部分撤单', '部撤', 'partial_canceled'].some((item) => value.includes(item.toLowerCase()))) return 'partial_canceled'
+  if (['全部成交', '已成', 'filled'].some((item) => value.includes(item.toLowerCase()))) return 'filled'
+  if (['部分成交', '部成', 'partial_filled'].some((item) => value.includes(item.toLowerCase()))) return 'partial_filled'
   if (['撤单中', 'cancel_pending'].some((item) => value.includes(item.toLowerCase()))) return 'cancel_pending'
   if (['已失效', '失效', 'expired'].some((item) => value.includes(item.toLowerCase()))) return 'expired'
   if (['部分失效', 'partial_expired'].some((item) => value.includes(item.toLowerCase()))) return 'partial_expired'
   if (['废单', 'rejected'].some((item) => value.includes(item.toLowerCase()))) return 'rejected'
   if (['失败', 'failed'].some((item) => value.includes(item.toLowerCase()))) return 'failed'
   if (value.includes('accepted')) return 'accepted'
+  if (['已提交未成交', '未成交', '已报', 'submitted', 'created'].some((item) => value.includes(item.toLowerCase()))) return 'submitted'
   return value || 'submitted'
 }
 

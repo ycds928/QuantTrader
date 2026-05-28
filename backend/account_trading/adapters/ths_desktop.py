@@ -16,6 +16,7 @@ import pandas as pd
 import pywinauto
 import pywinauto.clipboard
 import pywinauto.keyboard
+import win32clipboard
 import win32con
 import win32gui
 import win32process
@@ -60,6 +61,8 @@ class ThsDesktopAdapter:
 
     LEFT_MENU_CONTROL_ID = 129
     COMMON_GRID_CONTROL_ID = 1047
+    CANCEL_SELECTED_BUTTON_ID = 1099
+    CANCEL_ALL_BUTTON_ID = 30001
     TRADE_SECURITY_CONTROL_ID = 1032
     TRADE_PRICE_CONTROL_ID = 1033
     TRADE_AMOUNT_CONTROL_ID = 1034
@@ -101,6 +104,7 @@ class ThsDesktopAdapter:
         self.main: Any | None = None
 
     def connect(self) -> None:
+        self.client_path = self._normalize_client_path(self.client_path)
         if not self.client_path.exists():
             raise FileNotFoundError(f"同花顺交易客户端不存在: {self.client_path}")
 
@@ -113,6 +117,15 @@ class ThsDesktopAdapter:
             self.app = Application(backend="win32").start(str(self.client_path))
 
         self.main = self._wait_for_main_window(timeout_seconds=30)
+        self._activate_main_window()
+
+    def _normalize_client_path(self, client_path: Path) -> Path:
+        """The trading UI is xiadan.exe even when the user points at the main launcher."""
+        if client_path.name.lower() in {"hexinlauncher.exe", "hexin.exe"}:
+            xiadan_path = client_path.with_name("xiadan.exe")
+            if xiadan_path.exists():
+                return xiadan_path
+        return client_path
 
     def ensure_connected(self) -> tuple[Application, Any]:
         if self.app is None or self.main is None:
@@ -154,6 +167,23 @@ class ThsDesktopAdapter:
             f"同花顺交易客户端已尝试启动，但 {timeout_seconds} 秒内未发现主窗口。"
         ) from last_error
 
+    def _activate_main_window(self) -> None:
+        if self.main is None:
+            return
+        try:
+            if self.main.is_minimized():
+                self.main.restore()
+        except Exception:
+            pass
+        try:
+            self.main.set_focus()
+        except Exception:
+            try:
+                self._set_foreground(self.main)
+            except Exception:
+                pass
+        time.sleep(0.2)
+
     def status(self) -> dict[str, Any]:
         _, main = self.ensure_connected()
         return {
@@ -168,7 +198,14 @@ class ThsDesktopAdapter:
     def prepare_trading_workspace(self) -> dict[str, Any]:
         """启动/连接交易端，并验证下单和查询页面都可用。"""
         _, main = self.ensure_connected()
+        self._activate_main_window()
         self.close_pop_dialogs()
+        self._try_open_trading_session()
+        if self._is_login_page_visible():
+            raise TradingClientNotReadyError(
+                "同花顺交易程序已自动启动并置前，但当前停留在交易登录页。"
+                "请先在同花顺交易窗口完成交易密码/验证码登录；登录成功后再点击 Web 端连接。"
+            )
 
         checks: dict[str, Any] = {
             "buy_form_ready": False,
@@ -352,16 +389,78 @@ class ThsDesktopAdapter:
         return verification
 
     def cancel_order(self, entrust_no: str | None = None) -> dict[str, Any]:
+        if not str(entrust_no or "").strip():
+            raise ValueError("撤单必须提供合同编号，禁止不带合同编号执行默认撤单。")
+        entrust_no = str(entrust_no).strip()
+        try:
+            return self.cancel_order_from_today_orders(entrust_no)
+        except Exception as today_exc:
+            fallback_error = f"{type(today_exc).__name__}: {today_exc}"
+
         self.switch_menu(["撤单[F3]"])
-        if entrust_no:
-            self.select_cancel_row_by_entrust_no(entrust_no)
-        result = self.click_direct_cancel_button()
-        if entrust_no:
-            result["entrust_no"] = entrust_no
+        selected = self.select_cancel_row_by_entrust_no(entrust_no)
+        if not selected:
+            raise TradingClientNotReadyError(
+                f"当日委托双击撤单失败，且撤单列表中未找到合同编号 {entrust_no}，或该委托当前不可撤。"
+                f" 当日委托路径错误: {fallback_error}"
+            )
+        result = self.click_direct_cancel_button(entrust_no)
+        result["entrust_no"] = entrust_no
+        result["fallback_from_today_orders_error"] = fallback_error
         return result
+
+    def cancel_order_from_today_orders(self, entrust_no: str) -> dict[str, Any]:
+        self.switch_menu(["查询[F4]", "当日委托"])
+        row_count, row_index = self._find_grid_row_index_by_entrust_no(entrust_no)
+        self.switch_menu(["查询[F4]", "当日委托"], sleep_seconds=0.5)
+
+        trigger_method = self._trigger_cancel_from_grid_row(row_index, row_count)
+        if not trigger_method:
+            raise TradingClientNotReadyError(f"当日委托中已找到合同编号 {entrust_no}，但无法触发该行撤单。")
+
+        dialog_result = self.handle_pop_dialogs(
+            expected_cancel_entrust_no=entrust_no,
+            allow_unknown_cancel_dialog=True,
+        )
+        status_result = self._wait_cancel_status_confirmed(entrust_no)
+        return {
+            "status": status_result["status"],
+            "method": f"today_orders_{trigger_method}",
+            "target_entrust_no": entrust_no,
+            "dialog_result": dialog_result,
+            "status_result": status_result,
+            "balance_after": self.safe_balance(),
+            "entrust_no": entrust_no,
+        }
+
+    def cancel_all_orders(self) -> dict[str, Any]:
+        self.switch_menu(["撤单[F3]"])
+        target = self._find_cancel_button(self.CANCEL_ALL_BUTTON_ID)
+        if target is None:
+            raise TradingClientNotReadyError("未找到可见的全部撤单按钮。")
+        try:
+            if not target.is_enabled():
+                raise TradingClientNotReadyError("同花顺全部撤单按钮当前不可点击。")
+            _, main = self.ensure_connected()
+            self._set_foreground(main)
+            target.click_input()
+        except TradingClientNotReadyError:
+            raise
+        except Exception as exc:
+            raise TradingClientNotReadyError("同花顺全部撤单按钮点击失败。") from exc
+        time.sleep(1)
+        dialog_result = self.handle_pop_dialogs()
+        time.sleep(1)
+        return {
+            "status": "submitted",
+            "method": "cancel_all_button",
+            "dialog_result": dialog_result,
+            "balance_after": self.safe_balance(),
+        }
 
     def switch_menu(self, path: list[str], sleep_seconds: float = 0.2) -> None:
         _, main = self.ensure_connected()
+        self._activate_main_window()
         self.close_pop_dialogs()
         tree = main.child_window(
             control_id=self.LEFT_MENU_CONTROL_ID,
@@ -371,6 +470,13 @@ class ThsDesktopAdapter:
             tree.wait("ready", timeout=2)
             tree.get_item(path).select()
         except Exception as exc:
+            if self._is_login_page_visible():
+                raise TradingClientNotReadyError(
+                    "同花顺交易程序已自动启动并置前，但当前停留在交易登录页。"
+                    "请先在同花顺交易窗口完成交易密码/验证码登录；登录成功后再点击 Web 端连接。"
+                ) from exc
+            if self._switch_by_hotkey(path, sleep_seconds):
+                return
             if self._is_page_ready_for_path(path):
                 time.sleep(sleep_seconds)
                 return
@@ -383,13 +489,100 @@ class ThsDesktopAdapter:
             pass
         time.sleep(sleep_seconds)
 
+    def _switch_by_hotkey(self, path: list[str], sleep_seconds: float) -> bool:
+        target = "/".join(path)
+        key: str | None = None
+        if "撤单" in target and self._switch_cancel_by_toolbar(sleep_seconds):
+            return True
+        if "买入" in target:
+            key = "{F1}"
+        elif "卖出" in target:
+            key = "{F2}"
+        elif "撤单" in target:
+            key = "{F3}"
+        elif "查询" in target:
+            key = "{F4}"
+        if not key:
+            return False
+        try:
+            _, main = self.ensure_connected()
+            self._activate_main_window()
+            main.type_keys(key)
+            time.sleep(max(sleep_seconds, 0.8))
+            return self._is_page_ready_for_path(path)
+        except Exception:
+            return False
+
+    def _switch_cancel_by_toolbar(self, sleep_seconds: float) -> bool:
+        try:
+            _, main = self.ensure_connected()
+            self._activate_main_window()
+            for child in main.descendants():
+                try:
+                    if child.control_id() != 32817 or child.class_name() != "Button":
+                        continue
+                    rect = child.rectangle()
+                    if rect.width() <= 10 or rect.height() <= 10:
+                        continue
+                    pywinauto.mouse.click(
+                        button="left",
+                        coords=(int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)),
+                    )
+                    time.sleep(max(sleep_seconds, 0.8))
+                    return self._has_cancel_page_controls()
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return False
+
+    def _try_open_trading_session(self) -> None:
+        if self._has_balance_controls() or self._has_trade_form_controls():
+            return
+        try:
+            _, main = self.ensure_connected()
+            login_button = main.child_window(control_id=1709, class_name="Button")
+            if login_button.exists(timeout=0.5) and login_button.is_visible() and login_button.is_enabled():
+                login_button.click_input()
+                time.sleep(3)
+                self.close_pop_dialogs()
+        except Exception:
+            pass
+
+    def _is_login_page_visible(self) -> bool:
+        try:
+            _, main = self.ensure_connected()
+            visible_controls: list[tuple[int, str]] = []
+            for child in main.descendants():
+                try:
+                    if child.is_visible():
+                        visible_controls.append((child.control_id(), child.class_name()))
+                except Exception:
+                    continue
+            has_login_button = (1006, "Button") in visible_controls
+            has_password_edit = (1012, "Edit") in visible_controls
+            has_account_selector = any(
+                control_id in {1011, 2351, 2353} and class_name == "ComboBox"
+                for control_id, class_name in visible_controls
+            )
+            has_toolbar_login = (1709, "Button") in visible_controls
+            return (
+                ((has_login_button and has_password_edit and has_account_selector) or has_toolbar_login)
+                and not self._has_trade_form_controls()
+                and not self._has_balance_controls()
+            )
+        except Exception:
+            return False
+
     def _is_page_ready_for_path(self, path: list[str]) -> bool:
         target = "/".join(path)
         if "资金股票" in target:
             return self._has_balance_controls()
         if "买入" in target or "卖出" in target:
             return self._has_trade_form_controls()
-        if any(name in target for name in ("当日委托", "当日成交", "历史委托", "历史成交", "撤单")):
+        if "撤单" in target:
+            return self._has_cancel_page_controls()
+        if any(name in target for name in ("当日委托", "当日成交", "历史委托", "历史成交")):
             try:
                 self._find_grid()
                 return True
@@ -442,6 +635,25 @@ class ThsDesktopAdapter:
                 if not main.child_window(control_id=control_id, class_name="Edit").exists(timeout=0.2):
                     return False
             return True
+        except Exception:
+            return False
+
+    def _has_cancel_page_controls(self) -> bool:
+        try:
+            _, main = self.ensure_connected()
+            for child in main.descendants():
+                try:
+                    if child.control_id() != self.CANCEL_SELECTED_BUTTON_ID or child.class_name() != "Button":
+                        continue
+                    text = child.window_text() or ""
+                    if "撤单" not in text:
+                        continue
+                    rect = child.rectangle()
+                    if rect.width() > 20 and rect.height() > 10 and child.is_visible():
+                        return True
+                except Exception:
+                    continue
+            return False
         except Exception:
             return False
 
@@ -498,7 +710,7 @@ class ThsDesktopAdapter:
             time.sleep(0.1)
             pywinauto.keyboard.send_keys("^a^c")
             time.sleep(0.3)
-        content = pywinauto.clipboard.GetData()
+        content = self._get_clipboard_table_text()
         if not content.strip():
             return []
         df = pd.read_csv(
@@ -509,54 +721,186 @@ class ThsDesktopAdapter:
         )
         return df.to_dict("records")
 
-    def select_cancel_row_by_entrust_no(self, entrust_no: str) -> bool:
-        # Prefer a fast, robust default: current tested cancel page auto-selects
-        # the available row. If clipboard read works, click matching row.
+    def _get_clipboard_table_text(self) -> str:
         try:
-            rows = self.read_grid()
+            win32clipboard.OpenClipboard()
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                    data = win32clipboard.GetClipboardData(win32con.CF_TEXT)
+                    if isinstance(data, bytes):
+                        for encoding in ("gbk", "cp936", "mbcs"):
+                            try:
+                                return data.decode(encoding)
+                            except UnicodeDecodeError:
+                                continue
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                    data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                    if isinstance(data, str):
+                        return data
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            pass
+        return pywinauto.clipboard.GetData()
+
+    def select_cancel_row_by_entrust_no(self, entrust_no: str) -> bool:
+        entrust_no = str(entrust_no or "").strip()
+        if not entrust_no:
+            return False
+        try:
+            row_count, row_index = self._find_grid_row_index_by_entrust_no(entrust_no)
+            self.switch_menu(["撤单[F3]"], sleep_seconds=0.5)
+            return self._select_only_cancel_checkbox(row_index, row_count)
         except Exception:
             return False
+
+    def _find_grid_row_index_by_entrust_no(self, entrust_no: str) -> tuple[int, int]:
+        target = str(entrust_no or "").strip()
+        rows = self.read_grid()
         for index, row in enumerate(rows):
-            if str(row.get("合同编号", "")).strip() == entrust_no:
-                self._click_grid_row(index)
+            if self._row_contains_entrust_no(row, target):
+                return len(rows), index
+        raise TradingClientNotReadyError(f"当前表格中未找到合同编号 {target}。")
+
+    def _row_contains_entrust_no(self, row: dict[str, Any], entrust_no: str) -> bool:
+        target = str(entrust_no or "").strip()
+        if not target:
+            return False
+        for value in row.values():
+            text = str(value or "").strip()
+            if text == target:
+                return True
+            if text.endswith(".0") and text[:-2] == target:
                 return True
         return False
 
-    def click_direct_cancel_button(self) -> dict[str, Any]:
-        _, main = self.ensure_connected()
-        target = None
-        for child in main.children():
-            if child.class_name() != "Button":
+    def _order_cancel_status(self, row: dict[str, Any]) -> str:
+        status_text = ""
+        for key in ("委托状态", "状态", "状态说明", "委托状态说明", "处理结果", "备注", "说明"):
+            value = row.get(key)
+            if value not in (None, ""):
+                status_text = str(value).strip()
+                break
+        compact = status_text.replace(" ", "")
+        if any(token in compact for token in ("全部撤单", "已撤单", "已撤")):
+            return "canceled"
+        if any(token in compact for token in ("部分撤单", "部撤")):
+            return "partial_canceled"
+        if "撤单中" in compact:
+            return "cancel_pending"
+        if any(token in compact for token in ("全部成交", "已成")):
+            return "filled"
+        if any(token in compact for token in ("部分成交", "部成")):
+            return "partial_filled"
+        if any(token in compact for token in ("未成交", "已报", "已提交", "正报", "待报")):
+            return "submitted"
+        if any(token in compact for token in ("废单", "失败", "拒绝")):
+            return "rejected"
+        return compact or "unknown"
+
+    def _wait_cancel_status_confirmed(self, entrust_no: str, timeout_seconds: float = 8) -> dict[str, Any]:
+        target = str(entrust_no or "").strip()
+        deadline = time.monotonic() + timeout_seconds
+        last_row: dict[str, Any] | None = None
+        last_status = "unknown"
+
+        while time.monotonic() <= deadline:
+            time.sleep(0.8)
+            try:
+                rows = self.get_today_orders()
+            except Exception:
                 continue
-            text = child.window_text() or ""
-            rect = child.rectangle()
-            if text.startswith("撤单") and rect.width() > 20 and rect.height() > 10:
-                if target is None or (rect.top, rect.left) < (
-                    target.rectangle().top,
-                    target.rectangle().left,
-                ):
-                    target = child
+            for row in rows:
+                if not self._row_contains_entrust_no(row, target):
+                    continue
+                last_row = row
+                last_status = self._order_cancel_status(row)
+                if last_status in {"cancel_pending", "partial_canceled", "canceled"}:
+                    return {"confirmed": True, "status": last_status, "matched_order": row}
+                break
 
+        raise TradingClientNotReadyError(
+            f"撤单动作执行后回查同花顺，当日委托合同编号 {target} 状态仍未变为撤单中/部分撤单/全部撤单。"
+            f" 当前状态: {last_status}；匹配记录: {last_row or {}}"
+        )
+
+    def click_direct_cancel_button(self, entrust_no: str) -> dict[str, Any]:
+        _, main = self.ensure_connected()
+        target = self._find_cancel_button(self.CANCEL_SELECTED_BUTTON_ID)
+        trigger_method = "single_cancel_button"
         if target is None:
-            return {
-                "status": "failed",
-                "method": "direct_cancel_button",
-                "message": "未找到可见的撤单按钮",
-            }
-
-        target.click()
+            self._set_foreground(main)
+            pywinauto.keyboard.send_keys("{DELETE}")
+            if not self._wait_for_any_dialog(timeout_seconds=2):
+                raise TradingClientNotReadyError("未找到可见可点击的单笔撤单按钮，且按 Del 未触发撤单确认弹窗。")
+            trigger_method = "selected_row_delete"
+        else:
+            try:
+                self._set_foreground(main)
+                self._click_control_center(target)
+            except Exception as exc:
+                raise TradingClientNotReadyError(
+                    "同花顺单笔撤单按钮点击失败。通常是委托不可撤、未选中撤单记录，或交易端弹窗/验证码阻塞。"
+                ) from exc
         time.sleep(1)
-        dialog_result = self.handle_pop_dialogs()
-        time.sleep(1)
+        dialog_result = self.handle_pop_dialogs(
+            expected_cancel_entrust_no=entrust_no,
+            allow_unknown_cancel_dialog=True,
+        )
+        status_result = self._wait_cancel_status_confirmed(entrust_no)
         return {
-            "status": "submitted",
-            "method": "direct_cancel_button",
+            "status": status_result["status"],
+            "method": trigger_method,
+            "target_entrust_no": entrust_no,
             "dialog_result": dialog_result,
+            "status_result": status_result,
             "balance_after": self.safe_balance(),
         }
 
-    def handle_pop_dialogs(self) -> dict[str, Any]:
+    def _find_cancel_button(self, control_id: int):
+        _, main = self.ensure_connected()
+        candidates = []
+        for child in main.descendants():
+            try:
+                if child.control_id() != control_id or child.class_name() != "Button":
+                    continue
+                text = child.window_text() or ""
+                if control_id == self.CANCEL_SELECTED_BUTTON_ID:
+                    if "撤单" not in text or "全撤" in text or "全部" in text:
+                        continue
+                if not child.is_enabled():
+                    continue
+                rect = child.rectangle()
+                if rect.width() <= 20 or rect.height() <= 10:
+                    continue
+                if not child.is_visible() and control_id != self.CANCEL_SELECTED_BUTTON_ID:
+                    continue
+                candidates.append(child)
+            except Exception:
+                continue
+        if not candidates:
+            return None
+        return min(candidates, key=lambda item: (0 if item.is_visible() else 1, item.rectangle().top, item.rectangle().left))
+
+    def _click_control_center(self, control: Any) -> None:
+        try:
+            control.click_input()
+            return
+        except Exception:
+            pass
+        rect = control.rectangle()
+        pywinauto.mouse.click(
+            button="left",
+            coords=(int((rect.left + rect.right) / 2), int((rect.top + rect.bottom) / 2)),
+        )
+
+    def handle_pop_dialogs(
+        self,
+        expected_cancel_entrust_no: str | None = None,
+        allow_unknown_cancel_dialog: bool = False,
+    ) -> dict[str, Any]:
         app, main = self.ensure_connected()
+        handled_dialogs: list[dict[str, str]] = []
         while self.is_exist_pop_dialog():
             dialog = app.top_window()
             title = self._get_dialog_title(dialog)
@@ -568,12 +912,22 @@ class ThsDesktopAdapter:
                 continue
 
             if title == "委托确认" or title == "撤单确认":
+                if title == "撤单确认":
+                    self._assert_cancel_dialog_matches(content, expected_cancel_entrust_no)
                 self._submit_dialog_by_shortcut(dialog)
+                handled_dialogs.append({"title": title, "content": content})
                 time.sleep(0.5)
                 continue
 
             if title == "提示信息":
+                if expected_cancel_entrust_no and self._looks_like_bulk_cancel(content):
+                    raise TradingClientNotReadyError(
+                        f"同花顺弹窗疑似全部/批量撤单确认，已拒绝自动确认。目标合同编号: {expected_cancel_entrust_no}；弹窗内容: {content}"
+                    )
+                if expected_cancel_entrust_no:
+                    self._assert_cancel_dialog_matches(content, expected_cancel_entrust_no)
                 self._submit_dialog_by_shortcut(dialog)
+                handled_dialogs.append({"title": title, "content": content})
                 time.sleep(0.5)
                 continue
 
@@ -581,17 +935,35 @@ class ThsDesktopAdapter:
                 if "成功" in content:
                     entrust_no = self._extract_entrust_no(content)
                     self._click_confirm(dialog)
-                    return {"entrust_no": entrust_no, "message": content}
+                    handled_dialogs.append({"title": title, "content": content})
+                    return {"entrust_no": entrust_no, "message": content, "handled_dialogs": handled_dialogs}
+                if expected_cancel_entrust_no:
+                    self._assert_cancel_dialog_matches(content, expected_cancel_entrust_no)
                 self._click_confirm(dialog)
-                return {"message": content}
+                handled_dialogs.append({"title": title, "content": content})
+                return {"message": content, "handled_dialogs": handled_dialogs}
+
+            if expected_cancel_entrust_no and allow_unknown_cancel_dialog and not title.strip() and not content.strip():
+                self._submit_dialog_by_shortcut(dialog)
+                handled_dialogs.append({"title": title, "content": content})
+                time.sleep(0.8)
+                continue
+
+            if expected_cancel_entrust_no:
+                raise TradingClientNotReadyError(
+                    f"触发撤单后出现无法识别的同花顺弹窗，已停止自动确认，避免误撤。"
+                    f"目标合同编号: {expected_cancel_entrust_no}；弹窗标题: {title}；弹窗内容: {content}"
+                )
 
             try:
                 dialog.close()
             except Exception:
                 pass
-            return {"message": f"unknown dialog: {title} {content}"}
+            return {"message": f"unknown dialog: {title} {content}", "handled_dialogs": handled_dialogs}
 
-        return {"message": "success"}
+        if expected_cancel_entrust_no and not handled_dialogs:
+            return {"message": "no cancel dialog detected", "handled_dialogs": handled_dialogs}
+        return {"message": "success", "handled_dialogs": handled_dialogs}
 
     def is_exist_pop_dialog(self) -> bool:
         app, main = self.ensure_connected()
@@ -680,6 +1052,105 @@ class ThsDesktopAdapter:
         y = rect.top + 30 + index * 18
         pywinauto.mouse.click(button="left", coords=(x, y))
         time.sleep(0.2)
+
+    def _grid_row_point(self, index: int, row_count: int | None = None) -> tuple[int, int]:
+        grid = self._find_grid()
+        rect = grid.rectangle()
+        usable_height = max(18, rect.height() - 28)
+        row_height = 18
+        if row_count and row_count > 0:
+            row_height = max(16, min(28, usable_height / row_count))
+        row_y = int(rect.top + 28 + index * row_height + row_height / 2)
+        row_y = min(max(row_y, rect.top + 18), rect.bottom - 8)
+        row_x = rect.left + max(140, rect.width() // 3)
+        return row_x, row_y
+
+    def _double_click_grid_row(self, index: int, row_count: int | None = None) -> bool:
+        try:
+            grid = self._find_grid()
+            self._set_foreground(grid)
+            pywinauto.keyboard.send_keys("{ESC}")
+            time.sleep(0.1)
+            pywinauto.keyboard.send_keys("{VK_CONTROL up}{VK_SHIFT up}")
+            time.sleep(0.1)
+            x, y = self._grid_row_point(index, row_count)
+            pywinauto.mouse.double_click(button="left", coords=(x, y))
+            time.sleep(0.5)
+            return True
+        except Exception:
+            return False
+
+    def _trigger_cancel_from_grid_row(self, index: int, row_count: int | None = None) -> str | None:
+        if self._select_single_grid_row(index, row_count):
+            pywinauto.keyboard.send_keys("{DELETE}")
+            if self._wait_for_any_dialog(timeout_seconds=2):
+                return "selected_row_delete"
+
+        if self._double_click_grid_row(index, row_count):
+            if self._wait_for_any_dialog(timeout_seconds=2):
+                return "double_click"
+
+        if self._select_single_grid_row(index, row_count):
+            pywinauto.keyboard.send_keys("{ENTER}")
+            if self._wait_for_any_dialog(timeout_seconds=2):
+                return "selected_row_enter"
+
+        return None
+
+    def _select_single_grid_row(self, index: int, row_count: int | None = None) -> bool:
+        """Clear clipboard-read multi-selection and select exactly one cancel row."""
+        try:
+            grid = self._find_grid()
+            self._set_foreground(grid)
+            rect = grid.rectangle()
+            pywinauto.keyboard.send_keys("{ESC}")
+            time.sleep(0.1)
+            pywinauto.keyboard.send_keys("{VK_CONTROL up}{VK_SHIFT up}")
+            time.sleep(0.1)
+            x, row_y = self._grid_row_point(index, row_count)
+            for click_x in (rect.left + max(80, rect.width() // 5), x):
+                pywinauto.mouse.click(button="left", coords=(click_x, row_y))
+                time.sleep(0.15)
+            return True
+        except Exception:
+            return False
+
+    def _select_only_cancel_checkbox(self, index: int, row_count: int | None = None) -> bool:
+        try:
+            grid = self._find_grid()
+            self._set_foreground(grid)
+            rect = grid.rectangle()
+            rows = max(1, int(row_count or 1))
+            row_height = max(16, min(28, (rect.height() - 28) / rows))
+            checkbox_x = rect.left + 10
+
+            header_y = rect.top + 14
+            pywinauto.mouse.click(button="left", coords=(checkbox_x, header_y))
+            time.sleep(0.12)
+            pywinauto.mouse.click(button="left", coords=(checkbox_x, header_y))
+            time.sleep(0.12)
+
+            # The THS cancel grid copies rows in the reverse order of the visible table.
+            visual_index = max(0, min(rows - 1, rows - 1 - index))
+            target_y = int(rect.top + 28 + visual_index * row_height + row_height / 2)
+            pywinauto.mouse.click(button="left", coords=(checkbox_x, target_y))
+            time.sleep(0.2)
+            pywinauto.mouse.click(button="left", coords=(rect.left + 80, target_y))
+            time.sleep(0.2)
+            return True
+        except Exception:
+            return False
+
+    def _wait_for_any_dialog(self, timeout_seconds: float = 2) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() <= deadline:
+            if self._handle_captcha_dialog_if_present():
+                deadline = time.monotonic() + timeout_seconds
+                continue
+            if self.is_exist_pop_dialog():
+                return True
+            time.sleep(0.2)
+        return False
 
     def _set_foreground(self, window: Any) -> None:
         try:
@@ -851,15 +1322,20 @@ class ThsDesktopAdapter:
             return None
 
         candidates = self._preprocess_captcha_images(image)
-        config = "--psm 7 -c tessedit_char_whitelist=0123456789"
+        configs = [
+            "--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789",
+            "--oem 3 --psm 8 -c tessedit_char_whitelist=0123456789",
+            "--oem 3 --psm 13 -c tessedit_char_whitelist=0123456789",
+        ]
         for candidate in candidates:
-            try:
-                text = pytesseract.image_to_string(candidate, config=config)
-            except Exception:
-                continue
-            code = re.sub(r"\D", "", text or "")
-            if 4 <= len(code) <= 6:
-                return code
+            for config in configs:
+                try:
+                    text = pytesseract.image_to_string(candidate, config=config)
+                except Exception:
+                    continue
+                code = re.sub(r"\D", "", text or "")
+                if 4 <= len(code) <= 6:
+                    return code
         return None
 
     def _load_pytesseract(self) -> Any | None:
@@ -869,6 +1345,10 @@ class ThsDesktopAdapter:
             return None
 
         tesseract_cmd = os.getenv("TESSERACT_CMD") or os.getenv("TESSERACT_OCR_PATH")
+        if not tesseract_cmd:
+            default_tesseract = Path(r"E:\Tesseract-OCR\tesseract.exe")
+            if default_tesseract.exists():
+                tesseract_cmd = str(default_tesseract)
         if tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
         return pytesseract
@@ -882,6 +1362,7 @@ class ThsDesktopAdapter:
 
         for threshold in (120, 145, 170, 195):
             variants.append(denoised.point(lambda pixel, limit=threshold: 255 if pixel > limit else 0))
+            variants.append(denoised.point(lambda pixel, limit=threshold: 0 if pixel > limit else 255))
 
         try:
             import cv2
@@ -902,8 +1383,10 @@ class ThsDesktopAdapter:
             variants.extend(
                 [
                     Image.fromarray(otsu),
+                    Image.fromarray(cv2.bitwise_not(otsu)),
                     Image.fromarray(cv2.morphologyEx(otsu, cv2.MORPH_OPEN, kernel)),
                     Image.fromarray(adaptive),
+                    Image.fromarray(cv2.bitwise_not(adaptive)),
                 ]
             )
         except Exception:
@@ -981,23 +1464,59 @@ class ThsDesktopAdapter:
                 continue
         return " ".join(texts)
 
+    def _assert_cancel_dialog_matches(self, content: str, expected_entrust_no: str | None) -> None:
+        if not expected_entrust_no:
+            return
+        if self._looks_like_bulk_cancel(content):
+            raise TradingClientNotReadyError(
+                f"同花顺弹窗疑似全部/批量撤单确认，已拒绝自动确认。目标合同编号: {expected_entrust_no}；弹窗内容: {content}"
+            )
+        numbers = re.findall(r"\d{8,}", content or "")
+        if numbers and expected_entrust_no not in numbers:
+            raise TradingClientNotReadyError(
+                f"同花顺撤单确认弹窗合同编号与目标不一致，已拒绝自动确认。目标合同编号: {expected_entrust_no}；弹窗内容: {content}"
+            )
+
+    def _looks_like_bulk_cancel(self, content: str) -> bool:
+        text = str(content or "")
+        bulk_keywords = ("全部撤", "全撤", "批量", "所有", "全部委托", "全部可撤")
+        return any(keyword in text for keyword in bulk_keywords)
+
     def _submit_dialog_by_shortcut(self, dialog: Any) -> None:
         self._set_foreground(dialog)
         try:
             dialog.type_keys("%Y", set_foreground=False)
+            time.sleep(0.2)
+            if not self._dialog_exists(dialog):
+                return
         except Exception:
-            self._click_confirm(dialog)
+            pass
+        try:
+            dialog.type_keys("{ENTER}", set_foreground=False)
+            time.sleep(0.2)
+            if not self._dialog_exists(dialog):
+                return
+        except Exception:
+            pass
+        self._click_confirm(dialog)
+
+    def _dialog_exists(self, dialog: Any) -> bool:
+        try:
+            return dialog.exists(timeout=0.2)
+        except Exception:
+            return False
 
     def _click_confirm(self, dialog: Any) -> None:
         for child in dialog.children():
             try:
-                if child.class_name() == "Button" and "确定" in (child.window_text() or ""):
-                    child.click()
+                text = child.window_text() or ""
+                if child.class_name() == "Button" and any(label in text for label in ("确定", "是", "确认", "OK")):
+                    child.click_input()
                     return
             except Exception:
                 continue
         try:
-            dialog["确定"].click()
+            dialog["确定"].click_input()
         except Exception:
             pass
 

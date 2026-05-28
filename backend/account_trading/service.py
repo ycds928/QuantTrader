@@ -178,6 +178,20 @@ class AccountTradingService:
             manual_captcha_timeout=manual_captcha_timeout,
         )
 
+    def cancel_all_orders(
+        self,
+        client_path: str | None = None,
+        wait_manual_captcha: bool = True,
+        manual_captcha_timeout: int = 180,
+    ) -> dict[str, Any]:
+        return self._run(
+            "cancel_all_orders",
+            client_path,
+            lambda adapter: adapter.cancel_all_orders(),
+            wait_manual_captcha=wait_manual_captcha,
+            manual_captcha_timeout=manual_captcha_timeout,
+        )
+
     def confirm_order(
         self,
         *,
@@ -382,7 +396,7 @@ class AccountTradingService:
             "filled_quantity": self._int(row, "成交数量", "已成交数量"),
             "canceled_quantity": self._int(row, "撤单数量", "已撤数量", "撤单"),
             "avg_fill_price": self._decimal_text(self._first(row, "成交均价", "成交价格")),
-            "status": self._first(row, "委托状态", "状态"),
+            "status": self._first(row, "委托状态", "状态", "状态说明", "委托状态说明", "处理结果", "备注", "说明"),
             "submitted_at": self._first(row, "委托时间", "申报时间", "操作日期"),
             "raw": row,
         }

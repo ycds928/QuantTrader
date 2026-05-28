@@ -118,7 +118,7 @@ export default function AccountManagement() {
       exchange: account.exchange || '',
       status: account.status,
       is_default: account.is_default,
-      binding_type: binding?.binding_type || (account.account_type === 'live' ? 'desktop' : 'mock'),
+      binding_type: binding?.binding_type || defaultBindingType(account.account_type),
       client_path: binding?.client_path || '',
       client_identity: binding?.client_identity || '',
       binding_active: binding?.is_active ?? true,
@@ -152,7 +152,7 @@ export default function AccountManagement() {
       client_path: form.client_path.trim() || undefined,
       client_identity: form.client_identity.trim() || undefined,
       binding_active: form.binding_active,
-      initial_cash: form.account_type === 'paper' && form.initial_cash.trim() ? form.initial_cash.trim() : undefined,
+      initial_cash: ['paper', 'backtest'].includes(form.account_type) && form.initial_cash.trim() ? form.initial_cash.trim() : undefined,
       meta_json: metaJson,
     }
     const data = await callApi<ManagedAccount>(editingId ? 'update' : 'create', () =>
@@ -238,7 +238,7 @@ export default function AccountManagement() {
                       setForm({
                         ...form,
                         account_type: e.target.value as 'live' | 'paper' | 'backtest',
-                        binding_type: e.target.value === 'live' ? 'desktop' : 'mock',
+                        binding_type: defaultBindingType(e.target.value as 'live' | 'paper' | 'backtest'),
                       })
                     }
                     className={inputClass}
@@ -289,8 +289,8 @@ export default function AccountManagement() {
               <Field label="客户端路径">
                 <input value={form.client_path} onChange={(e) => setForm({ ...form, client_path: e.target.value })} className={inputClass} placeholder="E:\\同花顺软件\\同花顺\\xiadan.exe" />
               </Field>
-              {form.account_type === 'paper' && (
-                <Field label="模拟初始资金">
+              {['paper', 'backtest'].includes(form.account_type) && (
+                <Field label={form.account_type === 'backtest' ? '回测初始资金' : '模拟初始资金'}>
                   <input
                     type="number"
                     min="0"
@@ -520,4 +520,10 @@ function statusLabel(value: string) {
   if (value === 'inactive') return '停用'
   if (value === 'archived') return '归档'
   return value || '-'
+}
+
+function defaultBindingType(value: 'live' | 'paper' | 'backtest') {
+  if (value === 'live') return 'desktop'
+  if (value === 'backtest') return 'backtest'
+  return 'mock'
 }

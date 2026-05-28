@@ -11,7 +11,7 @@ from starlette.concurrency import run_in_threadpool
 from common.dependencies import get_db
 
 from .adapters.ths_desktop import CaptchaRequiredError, TradingClientNotReadyError
-from .repository import AccountTradingRepository
+from .repository import AccountTradingRepository, _normalize_order_status
 from .service import account_trading_service
 
 
@@ -46,7 +46,7 @@ class AccountManageRequest(BaseModel):
     client_path: str | None = Field(default=None, max_length=255)
     client_identity: str | None = Field(default=None, max_length=128)
     binding_active: bool = True
-    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟账户初始资金")
+    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟/回测账户初始资金")
     meta_json: dict[str, Any] | None = None
 
 
@@ -64,7 +64,7 @@ class AccountUpdateRequest(BaseModel):
     client_path: str | None = Field(default=None, max_length=255)
     client_identity: str | None = Field(default=None, max_length=128)
     binding_active: bool | None = None
-    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟账户初始资金")
+    initial_cash: Decimal | None = Field(default=None, gt=0, description="模拟/回测账户初始资金")
     meta_json: dict[str, Any] | None = None
 
 
@@ -211,7 +211,8 @@ async def get_account_context(
             raise HTTPException(status_code=400, detail={"message": "当前桌面适配器只支持实盘账户交易。", "type": "unsupported_account_type"})
         status_data: dict[str, Any] = {}
         if account.account_type == "live":
-            status_data = await run_in_threadpool(account_trading_service.status)
+            client_path = await repo.get_active_client_path(account)
+            status_data = await run_in_threadpool(account_trading_service.status, client_path)
             assert_desktop_account_matches(account, status_data)
     else:
         status_data = await run_in_threadpool(account_trading_service.status)
@@ -376,7 +377,8 @@ async def automation_connect(payload: AutomationConnectRequest | None = None, db
             if account.account_type != "live":
                 raise HTTPException(status_code=400, detail={"message": "当前账户类型暂不支持交易端连接。", "type": "unsupported_account_type"})
 
-            data = await run_in_threadpool(account_trading_service.prepare_trading_workspace)
+            client_path = await repo.get_active_client_path(account)
+            data = await run_in_threadpool(account_trading_service.prepare_trading_workspace, client_path)
             assert_desktop_account_matches(account, data)
             await repo.update_runtime_status(account, data)
             return ok(
@@ -440,9 +442,10 @@ async def get_balance(
             "query_balance",
             {"wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
+        client_path = await repo.get_active_client_path(account)
         data = await run_in_threadpool(
             account_trading_service.balance,
-            None,
+            client_path,
             wait_manual_captcha,
             manual_captcha_timeout,
         )
@@ -475,9 +478,10 @@ async def get_positions(
             "query_positions",
             {"wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
+        client_path = await repo.get_active_client_path(account)
         data = await run_in_threadpool(
             account_trading_service.positions,
-            None,
+            client_path,
             wait_manual_captcha,
             manual_captcha_timeout,
         )
@@ -510,10 +514,11 @@ async def get_orders(
             {"scope": scope, "wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
         if account.account_type == "live":
+            client_path = await repo.get_active_client_path(account)
             data = await run_in_threadpool(
                 account_trading_service.orders,
                 scope,
-                None,
+                client_path,
                 wait_manual_captcha,
                 manual_captcha_timeout,
             )
@@ -548,10 +553,11 @@ async def get_trades(
             {"scope": scope, "wait_manual_captcha": wait_manual_captcha, "manual_captcha_timeout": manual_captcha_timeout},
         )
         if account.account_type == "live":
+            client_path = await repo.get_active_client_path(account)
             data = await run_in_threadpool(
                 account_trading_service.trades,
                 scope,
-                None,
+                client_path,
                 wait_manual_captcha,
                 manual_captcha_timeout,
             )
@@ -658,6 +664,7 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
             raise HTTPException(status_code=400, detail={"message": "当前账户类型暂不支持交易台下单。", "type": "unsupported_account_type"})
         if payload.account_id:
             repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        client_path = await repo.get_active_client_path(account)
         task = await repo.create_task(
             account,
             payload.side,
@@ -679,6 +686,7 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
             symbol=payload.symbol,
             price=payload.price,
             quantity=payload.quantity,
+            client_path=client_path,
             wait_manual_captcha=payload.wait_manual_captcha,
             manual_captcha_timeout=payload.manual_captcha_timeout,
             idempotency_key=payload.idempotency_key,
@@ -702,6 +710,7 @@ async def place_order(payload: OrderRequest, db: AsyncSession = Depends(get_db))
                 side=payload.side,
                 price=payload.price,
                 quantity=payload.quantity,
+                client_path=client_path,
                 wait_manual_captcha=payload.wait_manual_captcha,
                 manual_captcha_timeout=payload.manual_captcha_timeout,
             )
@@ -752,6 +761,7 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db
     payload = payload or CancelRequest()
     try:
         repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        client_path = await repo.get_active_client_path(account)
         task = await repo.create_task(
             account,
             "cancel",
@@ -760,7 +770,7 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db
         data = await run_in_threadpool(
             account_trading_service.cancel_order,
             entrust_no,
-            None,
+            client_path,
             payload.wait_manual_captcha,
             payload.manual_captcha_timeout,
         )
@@ -771,10 +781,12 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db
             confirmation = await run_in_threadpool(
                 account_trading_service.confirm_order,
                 entrust_no=entrust_no,
+                client_path=client_path,
                 wait_manual_captcha=payload.wait_manual_captcha,
                 manual_captcha_timeout=payload.manual_captcha_timeout,
             )
             data["confirmation"] = confirmation
+            final_status = _normalize_order_status(confirmation.get("final_status"))
             await repo.save_order_confirmation(
                 account,
                 confirmation,
@@ -796,7 +808,29 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db
                 },
                 None if confirmation.get("confirmed") else "撤单结果未能在当日委托中确认",
             )
+            if final_status not in {"cancel_pending", "partial_canceled", "canceled"}:
+                await repo.finish_task(
+                    task,
+                    "failed",
+                    {
+                        **data,
+                        "confirmation": confirmation,
+                        "failure_reason": "撤单后回查同花顺，当日委托状态没有变为撤单中、部分撤单或全部撤单。",
+                    },
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "撤单动作未在同花顺当日委托中确认成功，当前状态仍不是撤单中/部分撤单/全部撤单。请先同步核对该委托是否仍可撤。",
+                        "type": "cancel_not_confirmed",
+                        "entrust_no": entrust_no,
+                        "final_status": final_status,
+                        "confirmation": confirmation,
+                    },
+                )
         except Exception as confirm_exc:
+            if isinstance(confirm_exc, HTTPException):
+                raise
             data["confirmation"] = {
                 "confirmed": False,
                 "final_status": "confirmation_failed",
@@ -810,8 +844,42 @@ async def cancel_order(entrust_no: str, payload: CancelRequest | None = None, db
                 data["confirmation"],
                 str(confirm_exc),
             )
+            await repo.finish_task(task, "failed", data)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "撤单动作已执行，但撤单结果回查失败，不能判定为成功。请点击同步核对同花顺当日委托状态。",
+                    "type": "cancel_confirmation_failed",
+                    "entrust_no": entrust_no,
+                    "confirmation": data["confirmation"],
+                },
+            ) from confirm_exc
         await repo.finish_task(task, "success", data)
-        return ok(data, "撤单流程已执行，请以当日委托状态为准")
+        return ok(data, "撤单已在同花顺当日委托中确认")
+    except Exception as exc:
+        raise_api_error(exc)
+
+
+@router.post("/orders/cancel-all", response_model=ApiResponse)
+async def cancel_all_orders(payload: CancelRequest | None = None, db: AsyncSession = Depends(get_db)):
+    payload = payload or CancelRequest()
+    try:
+        repo, account, _ = await get_account_context(db, payload.account_id, require_live=True)
+        client_path = await repo.get_active_client_path(account)
+        task = await repo.create_task(
+            account,
+            "cancel",
+            {"scope": "all_cancellable", "wait_manual_captcha": payload.wait_manual_captcha},
+        )
+        data = await run_in_threadpool(
+            account_trading_service.cancel_all_orders,
+            client_path,
+            payload.wait_manual_captcha,
+            payload.manual_captcha_timeout,
+        )
+        await repo.save_balance(account, data.get("balance_after") or {})
+        await repo.finish_task(task, "success", data)
+        return ok(data, "全部撤单流程已执行，请立即同步当日委托确认状态")
     except Exception as exc:
         raise_api_error(exc)
 
@@ -843,9 +911,10 @@ async def sync_account(payload: SyncRequest | None = None, db: AsyncSession = De
             "sync",
             {"wait_manual_captcha": payload.wait_manual_captcha, "manual_captcha_timeout": payload.manual_captcha_timeout},
         )
+        client_path = await repo.get_active_client_path(account)
         data = await run_in_threadpool(
             account_trading_service.sync,
-            None,
+            client_path,
             payload.wait_manual_captcha,
             payload.manual_captcha_timeout,
         )

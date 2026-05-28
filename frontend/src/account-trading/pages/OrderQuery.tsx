@@ -302,15 +302,15 @@ function accountTypeLabel(value: string) {
 
 function orderStatusLabel(status: string) {
   const value = String(status || 'submitted').toLowerCase()
-  if (['已提交未成交', '未成交', '已报', 'submitted', 'created', 'accepted'].some((item) => value.includes(item.toLowerCase()))) return '已提交未成交'
-  if (['部分成交', '部成', 'partial_filled'].some((item) => value.includes(item.toLowerCase()))) return '部分成交'
-  if (['全部成交', '已成', 'filled'].some((item) => value.includes(item.toLowerCase()))) return '全部成交'
-  if (['部分撤单', '部撤', 'partial_canceled'].some((item) => value.includes(item.toLowerCase()))) return '部分撤单'
   if (['全部撤单', '已撤', 'canceled', 'cancelled'].some((item) => value.includes(item.toLowerCase()))) return '全部撤单'
+  if (['部分撤单', '部撤', 'partial_canceled'].some((item) => value.includes(item.toLowerCase()))) return '部分撤单'
+  if (['全部成交', '已成', 'filled'].some((item) => value.includes(item.toLowerCase()))) return '全部成交'
+  if (['部分成交', '部成', 'partial_filled'].some((item) => value.includes(item.toLowerCase()))) return '部分成交'
   if (['撤单中', 'cancel_pending'].some((item) => value.includes(item.toLowerCase()))) return '撤单中'
   if (['部分失效', 'partial_expired'].some((item) => value.includes(item.toLowerCase()))) return '部分成交后失效'
   if (['已失效', '失效', 'expired'].some((item) => value.includes(item.toLowerCase()))) return '已失效'
   if (['废单', 'rejected'].some((item) => value.includes(item.toLowerCase()))) return '废单'
   if (['失败', 'failed'].some((item) => value.includes(item.toLowerCase()))) return '失败'
+  if (['已提交未成交', '未成交', '已报', 'submitted', 'created', 'accepted'].some((item) => value.includes(item.toLowerCase()))) return '已提交未成交'
   return status || '-'
 }

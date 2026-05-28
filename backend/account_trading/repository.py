@@ -100,7 +100,7 @@ def _normalize_order_status(value: Any) -> str:
         "全部成交": "filled",
         "部成": "partial_filled",
         "部分成交": "partial_filled",
-        "部撤": "canceled",
+        "部撤": "partial_canceled",
         "部分撤单": "partial_canceled",
         "已撤": "canceled",
         "全部撤单": "canceled",
@@ -124,6 +124,18 @@ def _normalize_order_status(value: Any) -> str:
         "partial_expired": "partial_expired",
         "部分失效": "partial_expired",
     }
+    if any(keyword in text for keyword in ("全部撤单", "已撤单", "已撤")):
+        return "canceled"
+    if any(keyword in text for keyword in ("部分撤单", "部撤")):
+        return "partial_canceled"
+    if any(keyword in text for keyword in ("全部成交", "已成交", "已成")):
+        return "filled"
+    if any(keyword in text for keyword in ("部分成交", "部成")):
+        return "partial_filled"
+    if any(keyword in text for keyword in ("撤单中", "待撤")):
+        return "cancel_pending"
+    if any(keyword in text for keyword in ("废单", "拒单")):
+        return "rejected"
     return mapping.get(text, text or "submitted")
 
 
@@ -182,6 +194,19 @@ class AccountTradingRepository:
 
     async def get_account(self, account_id: int) -> TradingAccount | None:
         result = await self.db.execute(select(TradingAccount).where(TradingAccount.id == account_id))
+        return result.scalar_one_or_none()
+
+    async def get_active_client_path(self, account: TradingAccount) -> str | None:
+        result = await self.db.execute(
+            select(AccountBinding.client_path)
+            .where(
+                AccountBinding.account_id == account.id,
+                AccountBinding.is_active == 1,
+                AccountBinding.client_path.is_not(None),
+            )
+            .order_by(AccountBinding.last_connected_at.desc(), AccountBinding.id.desc())
+            .limit(1)
+        )
         return result.scalar_one_or_none()
 
     async def list_order_records(self, account: TradingAccount, scope: str = "today") -> list[dict[str, Any]]:
@@ -328,8 +353,8 @@ class AccountTradingRepository:
         self.db.add(account)
         await self.db.flush()
         await self._save_binding(account, payload)
-        if account.account_type == "paper":
-            await self._apply_paper_initial_cash(account, payload, only_if_empty=True)
+        if account.account_type in {"paper", "backtest"}:
+            await self._apply_initial_cash(account, payload, only_if_empty=True)
         if account.is_default:
             await self._unset_other_defaults(account.id)
         await self.db.flush()
@@ -362,8 +387,8 @@ class AccountTradingRepository:
             account.meta_json = payload.get("meta_json") if isinstance(payload.get("meta_json"), dict) else None
 
         await self._save_binding(account, payload)
-        if account.account_type == "paper" and "initial_cash" in payload:
-            await self._apply_paper_initial_cash(account, payload, only_if_empty=False)
+        if account.account_type in {"paper", "backtest"} and "initial_cash" in payload:
+            await self._apply_initial_cash(account, payload, only_if_empty=False)
         if account.is_default:
             await self._unset_other_defaults(account.id)
         await self.db.flush()
@@ -432,7 +457,7 @@ class AccountTradingRepository:
         return result.scalars().all()
 
     async def _save_binding(self, account: TradingAccount, payload: dict[str, Any]) -> None:
-        binding_type = _clean_text(payload.get("binding_type")) or ("desktop" if account.account_type == "live" else "mock")
+        binding_type = _clean_text(payload.get("binding_type")) or self._default_binding_type(account.account_type)
         client_identity = _clean_text(payload.get("client_identity")) or f"{binding_type}:{account.account_code}"
         result = await self.db.execute(
             select(AccountBinding).where(
@@ -468,7 +493,14 @@ class AccountTradingRepository:
         suffix = uuid4().hex[:8].upper()
         return f"{account_type.upper()}_{suffix}"
 
-    async def _apply_paper_initial_cash(
+    def _default_binding_type(self, account_type: str) -> str:
+        if account_type == "live":
+            return "desktop"
+        if account_type == "backtest":
+            return "backtest"
+        return "mock"
+
+    async def _apply_initial_cash(
         self,
         account: TradingAccount,
         payload: dict[str, Any],
@@ -484,6 +516,8 @@ class AccountTradingRepository:
             return
         meta_json["initial_cash"] = str(initial_cash)
         account.meta_json = meta_json
+        if account.account_type != "paper":
+            return
         if only_if_empty and await self._has_paper_balance(account):
             return
         await self._save_paper_balance_snapshot(
@@ -1011,6 +1045,7 @@ class AccountTradingRepository:
         trade_date = _today()
         submitted_at = _parse_datetime(item.get("submitted_at"), trade_date)
         status = self._normalize_order_status_from_item(item)
+        quantity, filled_quantity, canceled_quantity = self._derive_order_quantities(item, status)
         if order is None:
             order = order_cls(
                 account_id=account.id,
@@ -1021,9 +1056,9 @@ class AccountTradingRepository:
                 name=item.get("name") or None,
                 side=str(item.get("side") or ""),
                 price=_decimal(item.get("price")),
-                quantity=_int(item.get("quantity")),
-                filled_quantity=_int(item.get("filled_quantity")),
-                canceled_quantity=_int(item.get("canceled_quantity")),
+                quantity=quantity,
+                filled_quantity=filled_quantity,
+                canceled_quantity=canceled_quantity,
                 avg_fill_price=_decimal(item.get("avg_fill_price")),
                 status=status,
                 source=account.account_type,
@@ -1042,16 +1077,32 @@ class AccountTradingRepository:
             order.name = item.get("name") or order.name
             order.side = str(item.get("side") or order.side or "")
             order.price = _decimal(item.get("price"))
-            order.quantity = _int(item.get("quantity"))
-            order.filled_quantity = _int(item.get("filled_quantity"))
-            order.canceled_quantity = _int(item.get("canceled_quantity"))
+            order.quantity = quantity
+            order.filled_quantity = filled_quantity
+            order.canceled_quantity = canceled_quantity
             order.avg_fill_price = _decimal(item.get("avg_fill_price"))
             order.status = status
+            if status in {"canceled", "partial_canceled"} and canceled_quantity > 0 and order.canceled_at is None:
+                order.canceled_at = _now()
             order.submitted_at = submitted_at or order.submitted_at
             order.raw_json = item.get("raw") or item
             if from_status != status:
                 await self._append_order_status_log(account, order, from_status, status, "sync_update", "ths_desktop", item)
         return order
+
+    def _derive_order_quantities(self, item: dict[str, Any], status: str) -> tuple[int, int, int]:
+        quantity = _int(item.get("quantity"))
+        filled_quantity = _int(item.get("filled_quantity"))
+        canceled_quantity = _int(item.get("canceled_quantity"))
+        if quantity <= 0:
+            return quantity, filled_quantity, canceled_quantity
+        if status == "filled" and filled_quantity <= 0:
+            filled_quantity = quantity
+        if status == "canceled":
+            canceled_quantity = max(canceled_quantity, quantity - filled_quantity)
+        if status == "partial_canceled" and canceled_quantity <= 0 and filled_quantity < quantity:
+            canceled_quantity = quantity - filled_quantity
+        return quantity, filled_quantity, canceled_quantity
 
     def _normalize_order_status_from_item(self, item: dict[str, Any]) -> str:
         status = _normalize_order_status(item.get("status"))
