@@ -4,7 +4,9 @@ import {
   HomePage,
   ApiDataPage,
   SymbolDetailPage,
-  AccountPage,
+  AccountManagementPage,
+  TradingDeskPage,
+  OrderQueryPage,
   StrategiesPage,
   StrategyEditorPage,
   ExecutionPage,
@@ -28,7 +30,10 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/api-data" element={<ApiDataPage />} />
           <Route path="/symbol-detail" element={<SymbolDetailPage />} />
-          <Route path="/account" element={<AccountPage />} />
+          <Route path="/account" element={<AccountManagementPage />} />
+          <Route path="/account/manage" element={<AccountManagementPage />} />
+          <Route path="/account/trading" element={<TradingDeskPage />} />
+          <Route path="/account/orders" element={<OrderQueryPage />} />
           <Route path="/strategies" element={<StrategiesPage />} />
           <Route path="/strategy-editor" element={<StrategyEditorPage />} />
           <Route path="/execution" element={<ExecutionPage />} />

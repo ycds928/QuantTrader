@@ -9,6 +9,7 @@ from strategy_engine.router import router as strategy_router
 from strategy_execution.router import router as execution_router
 from review_analysis.router import router as review_router
 from history_replay.router import router as replay_router
+from integration_api.router import router as integration_router
 
 settings = get_settings()
 
@@ -28,6 +29,7 @@ app.include_router(strategy_router)
 app.include_router(execution_router)
 app.include_router(review_router)
 app.include_router(replay_router)
+app.include_router(integration_router)
 
 
 @app.get("/api/health")

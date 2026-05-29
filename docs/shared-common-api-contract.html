@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>账户交易与复盘分析共用 API 接口文档 - QuantFlow</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0f;
+      --panel: #151526;
+      --panel-high: #1c1c31;
+      --line: #303348;
+      --text: #e5e7eb;
+      --muted: #a1a1aa;
+      --accent: #38bdf8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --code: #d1d5db;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      padding: 34px 42px 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-high);
+    }
+    main {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 28px 32px 72px;
+    }
+    h1, h2, h3, h4 { margin: 0; line-height: 1.25; }
+    h1 { font-size: 28px; }
+    h2 {
+      margin-top: 38px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      font-size: 22px;
+    }
+    h3 { margin-top: 26px; font-size: 18px; color: var(--accent); }
+    h4 { margin-top: 18px; font-size: 15px; }
+    p { margin: 10px 0; }
+    a { color: var(--accent); }
+    code, pre {
+      font-family: "JetBrains Mono", Consolas, "Microsoft YaHei UI", monospace;
+      color: var(--code);
+    }
+    pre {
+      overflow: auto;
+      padding: 14px;
+      background: #10101d;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 22px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    th, td {
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--panel-high);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    ul { margin: 8px 0 14px 22px; padding: 0; }
+    li { margin: 4px 0; }
+    .muted { color: var(--muted); }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+      color: var(--muted);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #111122;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .tag-ok { color: var(--ok); }
+    .tag-warn { color: var(--warn); }
+    .tag-danger { color: var(--danger); }
+    .note {
+      margin: 14px 0;
+      padding: 11px 14px;
+      border-left: 4px solid var(--accent);
+      background: #0e1a26;
+    }
+    .note.warn {
+      border-left-color: var(--warn);
+      background: #21180a;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 16px;
+    }
+    .toc {
+      columns: 2;
+      column-gap: 36px;
+      margin-top: 12px;
+    }
+    .toc a {
+      display: block;
+      break-inside: avoid;
+      padding: 3px 0;
+      text-decoration: none;
+    }
+    .api {
+      margin-top: 22px;
+      padding-top: 4px;
+    }
+    .method {
+      display: inline-flex;
+      min-width: 52px;
+      justify-content: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #0f2a3a;
+      color: var(--accent);
+      font: 12px/1.5 "JetBrains Mono", Consolas, monospace;
+      font-weight: 700;
+    }
+    .path {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    @media (max-width: 880px) {
+      header { padding: 24px 18px 16px; }
+      main { padding: 20px 14px 48px; }
+      .grid { grid-template-columns: 1fr; }
+      .toc { columns: 1; }
+      table { display: block; overflow-x: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>账户交易与复盘分析共用 API 接口文档</h1>
+    <p class="muted">QuantFlow 个人量化交易平台｜提供给策略执行、风控、复盘、历史回放、前端页面等下游模块使用</p>
+    <div class="meta">
+      <span class="pill">文档版本：v1.0</span>
+      <span class="pill">生成日期：2026-05-25</span>
+      <span class="pill">后端：FastAPI</span>
+      <span class="pill">统一前缀：/api</span>
+      <span class="pill">交易市场：A 股</span>
+    </div>
+  </header>
+
+  <main>
+    <section id="scope">
+      <h2>1. 文档范围</h2>
+      <p>本文档整理“账户与交易对接”和“复盘分析与策略优化”两个模块对其他模块开放的共用 API。接口来源以当前后端路由和已有模块设计文档为准。</p>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>后端目录</th>
+            <th>API 前缀</th>
+            <th>职责</th>
+            <th>当前状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>账户与交易对接</td>
+            <td><code>backend/account_trading/</code></td>
+            <td><code>/api/account</code></td>
+            <td>账户连接状态、资金、持仓、委托、成交、下单、撤单、全量同步、自动化日志。</td>
+            <td><span class="tag-ok">已实现主要接口</span></td>
+          </tr>
+          <tr>
+            <td>复盘分析与策略优化</td>
+            <td><code>backend/review_analysis/</code></td>
+            <td><code>/api/review</code></td>
+            <td>复盘报告、复盘交易明细、策略优化建议。</td>
+            <td><span class="tag-warn">路由已注册，当前为占位实现</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note warn">
+        <strong>对接提醒：</strong>账户交易接口已经具备具体请求校验和返回字段口径；复盘接口当前代码返回占位数据，建议下游先按本文档确认字段契约，等复盘计算落地后再联调。
+      </div>
+    </section>
+
+    <section id="toc">
+      <h2>2. 目录</h2>
+      <div class="toc">
+        <a href="#common">3. 统一约定</a>
+        <a href="#downstream">4. 下游目标模块</a>
+        <a href="#summary">5. 接口总览</a>
+        <a href="#account-apis">6. 账户与交易接口</a>
+        <a href="#review-apis">7. 复盘分析接口</a>
+        <a href="#schemas">8. 数据结构说明</a>
+        <a href="#errors">9. 错误码与异常</a>
+        <a href="#flow">10. 推荐调用流程</a>
+        <a href="#todo">11. 待确认事项</a>
+      </div>
+    </section>
+
+    <section id="common">
+      <h2>3. 统一约定</h2>
+      <h3>3.1 基础信息</h3>
+      <table>
+        <tbody>
+          <tr>
+            <th>基础路径</th>
+            <td><code>/api</code></td>
+          </tr>
+          <tr>
+            <th>数据格式</th>
+            <td>请求体与响应体均使用 JSON。GET 参数使用 query string。</td>
+          </tr>
+          <tr>
+            <th>金额与价格</th>
+            <td>后端返回多数字段为字符串形式的小数，如 <code>"240.70"</code>，下游展示时按 decimal 处理，避免浮点误差。</td>
+          </tr>
+          <tr>
+            <th>A 股数量规则</th>
+            <td>下单数量 <code>quantity</code> 必须大于 0，且必须为 100 股整数倍。</td>
+          </tr>
+          <tr>
+            <th>颜色约定</th>
+            <td>前端展示遵循中国惯例：红涨绿跌，即 <code>text-up</code> 为红色，<code>text-down</code> 为绿色。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3.2 统一响应结构</h3>
+      <pre><code>{
+  "success": true,
+  "data": {},
+  "message": "ok"
+}</code></pre>
+      <table>
+        <thead>
+          <tr>
+            <th>字段</th>
+            <th>类型</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>success</code></td>
+            <td><code>boolean</code></td>
+            <td>业务是否成功。</td>
+          </tr>
+          <tr>
+            <td><code>data</code></td>
+            <td><code>object | array | null</code></td>
+            <td>接口业务数据。不同接口结构不同。</td>
+          </tr>
+          <tr>
+            <td><code>message</code></td>
+            <td><code>string</code></td>
+            <td>给调用方展示或记录的简短说明。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>3.3 通用枚举</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>枚举</th>
+            <th>值</th>
+            <th>说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>account_type</code> / <code>mode</code></td>
+            <td><code>live</code> / <code>paper</code> / <code>backtest</code></td>
+            <td>实盘 / 模拟盘 / 回测。当前同花顺桌面适配器下单只支持 <code>live</code>。</td>
+          </tr>
+          <tr>
+            <td><code>side</code></td>
+            <td><code>buy</code> / <code>sell</code></td>
+            <td>买入 / 卖出。</td>
+          </tr>
+          <tr>
+            <td><code>scope</code></td>
+            <td><code>today</code> / <code>history</code></td>
+            <td>查询当日委托/成交或历史委托/成交。</td>
+          </tr>
+          <tr>
+            <td><code>order_status</code></td>
+            <td><code>submitted</code> / <code>partial_filled</code> / <code>filled</code> / <code>canceled</code> / <code>rejected</code> / <code>failed</code></td>
+            <td>订单生命周期状态。实盘状态以券商交易端返回为准。</td>
+          </tr>
+          <tr>
+            <td><code>source</code></td>
+            <td><code>live</code> / <code>paper</code> / <code>backtest</code> / <code>replay</code> / <code>manual</code></td>
+            <td>数据来源。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="downstream">
+      <h2>4. 下游目标模块</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>目标下游</th>
+            <th>使用目的</th>
+            <th>主要消费接口</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>前端账户页面</td>
+            <td>展示账户连接状态、资金、持仓、委托、成交；支持人工下单和撤单。</td>
+            <td><code>/api/account/automation/status</code>、<code>/balance</code>、<code>/positions</code>、<code>/orders</code>、<code>/trades</code>、<code>/order</code>、<code>/sync</code></td>
+          </tr>
+          <tr>
+            <td>策略执行模块</td>
+            <td>检查账户可用性、读取持仓和委托状态、发起策略交易、撤销异常委托。</td>
+            <td><code>/api/account/automation/status</code>、<code>/positions</code>、<code>/orders</code>、<code>/order</code>、<code>/order/{entrust_no}/cancel</code></td>
+          </tr>
+          <tr>
+            <td>实时风控模块</td>
+            <td>下单前检查资金、仓位、可卖数量；盘中监控订单、成交、异常状态。</td>
+            <td><code>/api/account/balance</code>、<code>/positions</code>、<code>/orders</code>、<code>/trades</code></td>
+          </tr>
+          <tr>
+            <td>复盘分析模块</td>
+            <td>消费资金、持仓、委托、成交，计算绩效指标、交易归因和优化建议。</td>
+            <td><code>/api/account/*</code>、<code>/api/review/*</code></td>
+          </tr>
+          <tr>
+            <td>历史回放模块</td>
+            <td>复用订单、成交、持仓、资金结构，对齐实盘/模拟/回测口径。</td>
+            <td><code>/api/review/trades</code>、后续建议接入 <code>/api/review/session/{id}/trades</code></td>
+          </tr>
+          <tr>
+            <td>策略优化负责人</td>
+            <td>读取复盘指标与建议，形成策略参数调整、风控调整、进出场优化方案。</td>
+            <td><code>/api/review/report</code>、<code>/api/review/suggestions</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="summary">
+      <h2>5. 接口总览</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>方法</th>
+            <th>路径</th>
+            <th>作用</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/automation/status</code></td><td>获取交易客户端自动化状态。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/automation/logs</code></td><td>获取自动化运行日志。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/balance</code></td><td>查询并同步账户资金。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/positions</code></td><td>查询并同步持仓列表。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/orders</code></td><td>查询并同步委托列表。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">GET</span></td><td><code>/api/account/trades</code></td><td>查询并同步成交列表。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">POST</span></td><td><code>/api/account/order</code></td><td>发起实盘限价委托。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">POST</span></td><td><code>/api/account/order/{entrust_no}/cancel</code></td><td>按合同编号撤单。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>账户交易</td><td><span class="method">POST</span></td><td><code>/api/account/sync</code></td><td>同步资金、持仓、当日委托、当日成交。</td><td class="tag-ok">已实现</td></tr>
+          <tr><td>复盘分析</td><td><span class="method">GET</span></td><td><code>/api/review/report</code></td><td>获取复盘报告。</td><td class="tag-warn">占位</td></tr>
+          <tr><td>复盘分析</td><td><span class="method">GET</span></td><td><code>/api/review/trades</code></td><td>获取复盘交易记录。</td><td class="tag-warn">占位</td></tr>
+          <tr><td>复盘分析</td><td><span class="method">GET</span></td><td><code>/api/review/suggestions</code></td><td>获取策略优化建议。</td><td class="tag-warn">占位</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="account-apis">
+      <h2>6. 账户与交易接口</h2>
+
+      <article class="api" id="api-automation-status">
+        <h3><span class="method">GET</span> <span class="path">/api/account/automation/status</span></h3>
+        <p>获取同花顺桌面客户端连接状态、窗口状态和当前识别到账户信息。调用该接口会尝试读取自动化适配器状态，并更新账户运行状态。</p>
+        <table>
+          <thead><tr><th>项目</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>请求参数</td><td>无</td></tr>
+            <tr><td>目标下游</td><td>前端账户页面、策略执行、实时风控、运维监控。</td></tr>
+            <tr><td>数据落点</td><td><code>trading_account</code>、<code>account_runtime_status</code>。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>connected</code></td><td><code>boolean</code></td><td>是否已连接到交易客户端。</td></tr>
+            <tr><td><code>ready</code></td><td><code>boolean</code></td><td>是否处于可交易/可查询状态。</td></tr>
+            <tr><td><code>window_title</code></td><td><code>string</code></td><td>交易客户端窗口标题。</td></tr>
+            <tr><td><code>window_class</code></td><td><code>string</code></td><td>窗口类名。</td></tr>
+            <tr><td><code>window_rect</code></td><td><code>object</code></td><td>窗口位置和尺寸。</td></tr>
+            <tr><td><code>account</code></td><td><code>object</code></td><td>识别到账户信息，见 <a href="#schema-account">账户信息结构</a>。</td></tr>
+          </tbody>
+        </table>
+        <pre><code>{
+  "success": true,
+  "data": {
+    "connected": true,
+    "ready": true,
+    "window_title": "网上股票交易系统",
+    "window_class": "AfxWnd",
+    "window_rect": { "left": 0, "top": 0, "right": 1200, "bottom": 800 },
+    "account": {
+      "account_name": "模拟炒股-UI**39",
+      "account_type": "paper",
+      "account_type_label": "模拟盘",
+      "market": "深圳A股",
+      "shareholder_account": "001****9089",
+      "capital_account": "116453076"
+    }
+  },
+  "message": "同花顺连接状态已获取"
+}</code></pre>
+      </article>
+
+      <article class="api" id="api-automation-logs">
+        <h3><span class="method">GET</span> <span class="path">/api/account/automation/logs</span></h3>
+        <p>获取最近的自动化操作日志，用于页面展示、问题定位和对接排查。</p>
+        <h4>Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>limit</code></td><td><code>integer</code></td><td><code>50</code></td><td>1-200</td><td>返回最近 N 条日志。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <p>数组，每项包含 <code>id</code>、<code>operation</code>、<code>status</code>、<code>message</code>、<code>created_at</code>、<code>detail</code>。</p>
+      </article>
+
+      <article class="api" id="api-balance">
+        <h3><span class="method">GET</span> <span class="path">/api/account/balance</span></h3>
+        <p>查询账户资金，并将结果保存为资金快照。当前实现通过同花顺桌面适配器读取实盘资金。</p>
+        <h4>Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>wait_manual_captcha</code></td><td><code>boolean</code></td><td><code>false</code></td><td>-</td><td>遇到验证码时是否等待人工处理。</td></tr>
+            <tr><td><code>manual_captcha_timeout</code></td><td><code>integer</code></td><td><code>120</code></td><td>30-600</td><td>等待人工验证码的超时时间，单位秒。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <p>见 <a href="#schema-balance">资金快照结构</a>。</p>
+        <pre><code>{
+  "success": true,
+  "data": {
+    "account_id": "ths-local",
+    "mode": "live",
+    "total_asset": "100000.00",
+    "available_cash": "50000.00",
+    "withdrawable_cash": "50000.00",
+    "market_value": "50000.00",
+    "cash_balance": "50000.00",
+    "frozen_cash": "0.00",
+    "updated_at": "2026-05-25T14:20:00",
+    "raw": {}
+  },
+  "message": "账户余额已同步"
+}</code></pre>
+      </article>
+
+      <article class="api" id="api-positions">
+        <h3><span class="method">GET</span> <span class="path">/api/account/positions</span></h3>
+        <p>查询账户持仓列表，并将结果保存为持仓快照。</p>
+        <h4>Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>wait_manual_captcha</code></td><td><code>boolean</code></td><td><code>false</code></td><td>-</td><td>遇到验证码时是否等待人工处理。</td></tr>
+            <tr><td><code>manual_captcha_timeout</code></td><td><code>integer</code></td><td><code>120</code></td><td>30-600</td><td>等待人工验证码的超时时间，单位秒。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <p>数组，每项见 <a href="#schema-position">持仓结构</a>。</p>
+      </article>
+
+      <article class="api" id="api-orders">
+        <h3><span class="method">GET</span> <span class="path">/api/account/orders</span></h3>
+        <p>查询当日或历史委托列表，并写入本地委托表和订单状态流水。</p>
+        <h4>Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>scope</code></td><td><code>string</code></td><td><code>today</code></td><td><code>today</code> / <code>history</code></td><td>查询当日委托或历史委托。</td></tr>
+            <tr><td><code>wait_manual_captcha</code></td><td><code>boolean</code></td><td><code>false</code></td><td>-</td><td>遇到验证码时是否等待人工处理。</td></tr>
+            <tr><td><code>manual_captcha_timeout</code></td><td><code>integer</code></td><td><code>120</code></td><td>30-600</td><td>等待人工验证码的超时时间，单位秒。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <p>数组，每项见 <a href="#schema-order">委托结构</a>。</p>
+      </article>
+
+      <article class="api" id="api-trades">
+        <h3><span class="method">GET</span> <span class="path">/api/account/trades</span></h3>
+        <p>查询当日或历史成交列表，并写入本地成交表。</p>
+        <h4>Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>scope</code></td><td><code>string</code></td><td><code>today</code></td><td><code>today</code> / <code>history</code></td><td>查询当日成交或历史成交。</td></tr>
+            <tr><td><code>wait_manual_captcha</code></td><td><code>boolean</code></td><td><code>false</code></td><td>-</td><td>遇到验证码时是否等待人工处理。</td></tr>
+            <tr><td><code>manual_captcha_timeout</code></td><td><code>integer</code></td><td><code>120</code></td><td>30-600</td><td>等待人工验证码的超时时间，单位秒。</td></tr>
+          </tbody>
+        </table>
+        <h4>响应 data</h4>
+        <p>数组，每项见 <a href="#schema-trade">成交结构</a>。</p>
+      </article>
+
+      <article class="api" id="api-order">
+        <h3><span class="method">POST</span> <span class="path">/api/account/order</span></h3>
+        <p>发起实盘限价委托。当前桌面适配器只实现 <code>live</code> 实盘模式，调用方必须传入幂等键，防止重复下单。</p>
+        <h4>请求体</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>默认值</th><th>约束</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>symbol</code></td><td><code>string</code></td><td>是</td><td>-</td><td>长度 6-12</td><td>证券代码。当前适配器可传 <code>301183</code> 等交易端识别格式；跨模块建议统一为 <code>301183.SZ</code> 后再由适配层转换。</td></tr>
+            <tr><td><code>side</code></td><td><code>string</code></td><td>是</td><td>-</td><td><code>buy</code> / <code>sell</code></td><td>买卖方向。</td></tr>
+            <tr><td><code>price</code></td><td><code>decimal</code></td><td>是</td><td>-</td><td>&gt; 0</td><td>限价委托价格。</td></tr>
+            <tr><td><code>quantity</code></td><td><code>integer</code></td><td>是</td><td>-</td><td>&gt; 0，100 股整数倍</td><td>委托股数。</td></tr>
+            <tr><td><code>mode</code></td><td><code>string</code></td><td>否</td><td><code>live</code></td><td>当前只支持 <code>live</code></td><td>账户模式。</td></tr>
+            <tr><td><code>idempotency_key</code></td><td><code>string</code></td><td>实盘必填</td><td><code>null</code></td><td>最长 80</td><td>幂等键，建议由调用方生成 UUID。</td></tr>
+            <tr><td><code>remark</code></td><td><code>string</code></td><td>否</td><td><code>null</code></td><td>最长 200</td><td>人工备注或策略说明。</td></tr>
+            <tr><td><code>wait_manual_captcha</code></td><td><code>boolean</code></td><td>否</td><td><code>true</code></td><td>-</td><td>遇到验证码时是否等待人工处理。</td></tr>
+            <tr><td><code>manual_captcha_timeout</code></td><td><code>integer</code></td><td>否</td><td><code>180</code></td><td>30-600</td><td>等待人工验证码超时时间，单位秒。</td></tr>
+          </tbody>
+        </table>
+        <pre><code>{
+  "symbol": "301183",
+  "side": "buy",
+  "price": 240.70,
+  "quantity": 100,
+  "mode": "live",
+  "idempotency_key": "9f972f9f-0d6d-46d0-a480-18c76a8c4c48",
+  "remark": "strategy-signal-001",
+  "wait_manual_captcha": true,
+  "manual_captcha_timeout": 180
+}</code></pre>
+        <h4>响应 data</h4>
+        <p>交易端返回的下单结果，通常包含请求回显、合同编号、可能成交记录、下单后资金等。最终状态以交易端委托列表和成交回报为准。</p>
+        <div class="note warn">
+          <strong>重要：</strong>调用 <code>POST /api/account/order</code> 成功只代表自动化委托流程执行完成，不等同于订单已全部成交。下游应继续调用 <code>/api/account/orders</code> 和 <code>/api/account/trades</code> 回查最终状态。
+        </div>
+      </article>
+
+      <article class="api" id="api-cancel">
+        <h3><span class="method">POST</span> <span class="path">/api/account/order/{entrust_no}/cancel</span></h3>
+        <p>按券商合同编号撤单。撤单结果写入委托表和订单状态流水。</p>
+        <h4>Path 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>entrust_no</code></td><td><code>string</code></td><td>券商合同编号，也就是委托编号。</td></tr>
+          </tbody>
+        </table>
+        <h4>请求体，可选</h4>
+        <pre><code>{
+  "wait_manual_captcha": true,
+  "manual_captcha_timeout": 180
+}</code></pre>
+        <h4>响应 data</h4>
+        <p>撤单执行结果，通常包含撤单状态、原始交易端返回、撤单后资金等。</p>
+      </article>
+
+      <article class="api" id="api-sync">
+        <h3><span class="method">POST</span> <span class="path">/api/account/sync</span></h3>
+        <p>同步账户核心数据：资金、持仓、当日委托、当日成交。适合作为页面刷新、定时任务或策略执行后的回查入口。</p>
+        <h4>请求体，可选</h4>
+        <pre><code>{
+  "wait_manual_captcha": true,
+  "manual_captcha_timeout": 180
+}</code></pre>
+        <h4>响应 data</h4>
+        <pre><code>{
+  "balance": {},
+  "positions": [],
+  "orders": [],
+  "trades": []
+}</code></pre>
+      </article>
+    </section>
+
+    <section id="review-apis">
+      <h2>7. 复盘分析接口</h2>
+      <div class="note warn">
+        当前 <code>backend/review_analysis/router.py</code> 中的 3 个接口已注册，但返回的是“模块开发中”的占位数据。下面字段为推荐对外契约，供下游提前对齐。
+      </div>
+
+      <article class="api" id="api-review-report">
+        <h3><span class="method">GET</span> <span class="path">/api/review/report</span></h3>
+        <p>获取复盘报告摘要，用于前端复盘页、策略负责人总览和报告导出。</p>
+        <h4>建议 Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>account_id</code></td><td><code>integer</code></td><td>否</td><td>账户 ID，不传则按默认账户或全部账户汇总。</td></tr>
+            <tr><td><code>account_type</code></td><td><code>string</code></td><td>否</td><td><code>live</code> / <code>paper</code> / <code>backtest</code>。</td></tr>
+            <tr><td><code>strategy_id</code></td><td><code>string</code></td><td>否</td><td>策略 ID。</td></tr>
+            <tr><td><code>start_date</code></td><td><code>date</code></td><td>否</td><td>复盘开始日期，格式 <code>YYYY-MM-DD</code>。</td></tr>
+            <tr><td><code>end_date</code></td><td><code>date</code></td><td>否</td><td>复盘结束日期，格式 <code>YYYY-MM-DD</code>。</td></tr>
+          </tbody>
+        </table>
+        <h4>建议响应 data</h4>
+        <pre><code>{
+  "session_id": 1001,
+  "title": "2026-05 实盘复盘",
+  "account_type": "live",
+  "source": "live",
+  "start_date": "2026-05-01",
+  "end_date": "2026-05-25",
+  "metrics": {
+    "total_return": "0.0832",
+    "annual_return": "0.1860",
+    "max_drawdown": "0.0420",
+    "sharpe_ratio": "1.62",
+    "win_rate": "0.58",
+    "profit_loss_ratio": "1.43",
+    "trade_count": 36
+  },
+  "summary": "本期收益主要来自趋势交易，最大回撤可控。",
+  "generated_at": "2026-05-25T14:30:00"
+}</code></pre>
+      </article>
+
+      <article class="api" id="api-review-trades">
+        <h3><span class="method">GET</span> <span class="path">/api/review/trades</span></h3>
+        <p>获取复盘交易明细，用于交易归因、问题定位、策略优化和历史回放。</p>
+        <h4>建议 Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>session_id</code></td><td><code>integer</code></td><td>否</td><td>复盘会话 ID。</td></tr>
+            <tr><td><code>account_type</code></td><td><code>string</code></td><td>否</td><td><code>live</code> / <code>paper</code> / <code>backtest</code>。</td></tr>
+            <tr><td><code>strategy_id</code></td><td><code>string</code></td><td>否</td><td>策略 ID。</td></tr>
+            <tr><td><code>symbol</code></td><td><code>string</code></td><td>否</td><td>证券代码。</td></tr>
+            <tr><td><code>start_date</code></td><td><code>date</code></td><td>否</td><td>开始日期。</td></tr>
+            <tr><td><code>end_date</code></td><td><code>date</code></td><td>否</td><td>结束日期。</td></tr>
+          </tbody>
+        </table>
+        <h4>建议响应 data</h4>
+        <p>数组，每项包含成交基础字段和复盘计算字段。</p>
+        <pre><code>[
+  {
+    "id": 1,
+    "session_id": 1001,
+    "account_id": 1,
+    "order_id": 2001,
+    "trade_id": "T202605250001",
+    "symbol": "301183.SZ",
+    "name": "示例证券",
+    "side": "buy",
+    "price": "240.70",
+    "quantity": 100,
+    "amount": "24070.00",
+    "pnl": "850.00",
+    "pnl_ratio": "0.0353",
+    "holding_period_minutes": 960,
+    "signal_tag": "breakout",
+    "created_at": "2026-05-25T14:30:00"
+  }
+]</code></pre>
+      </article>
+
+      <article class="api" id="api-review-suggestions">
+        <h3><span class="method">GET</span> <span class="path">/api/review/suggestions</span></h3>
+        <p>获取策略优化建议，供策略引擎、策略负责人和风控负责人使用。</p>
+        <h4>建议 Query 参数</h4>
+        <table>
+          <thead><tr><th>字段</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td><code>session_id</code></td><td><code>integer</code></td><td>否</td><td>复盘会话 ID。</td></tr>
+            <tr><td><code>strategy_id</code></td><td><code>string</code></td><td>否</td><td>策略 ID。</td></tr>
+            <tr><td><code>severity</code></td><td><code>string</code></td><td>否</td><td><code>low</code> / <code>medium</code> / <code>high</code>。</td></tr>
+            <tr><td><code>suggestion_type</code></td><td><code>string</code></td><td>否</td><td><code>risk</code> / <code>position</code> / <code>entry</code> / <code>exit</code> / <code>parameter</code>。</td></tr>
+          </tbody>
+        </table>
+        <h4>建议响应 data</h4>
+        <pre><code>[
+  {
+    "id": 1,
+    "session_id": 1001,
+    "suggestion_type": "risk",
+    "severity": "medium",
+    "title": "降低连续亏损后的仓位",
+    "content": "连续 3 笔亏损后建议将单笔仓位从 20% 降至 10%。",
+    "evidence": {
+      "trade_ids": ["T202605200001", "T202605210003"],
+      "metric": "max_drawdown",
+      "value": "0.0420"
+    },
+    "created_at": "2026-05-25T14:30:00"
+  }
+]</code></pre>
+      </article>
+
+      <h3>7.4 建议补齐的复盘接口</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>建议接口</th>
+            <th>方法</th>
+            <th>作用</th>
+            <th>目标下游</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/api/review/sessions</code></td><td><span class="method">GET</span></td><td>列出复盘会话。</td><td>前端复盘页、策略优化。</td></tr>
+          <tr><td><code>/api/review/session/{id}</code></td><td><span class="method">GET</span></td><td>获取复盘会话详情。</td><td>前端复盘页。</td></tr>
+          <tr><td><code>/api/review/session/{id}/metrics</code></td><td><span class="method">GET</span></td><td>获取指标列表。</td><td>策略优化、风控。</td></tr>
+          <tr><td><code>/api/review/session/{id}/trades</code></td><td><span class="method">GET</span></td><td>获取会话交易明细。</td><td>交易归因、历史回放。</td></tr>
+          <tr><td><code>/api/review/session/{id}/suggestions</code></td><td><span class="method">GET</span></td><td>获取会话优化建议。</td><td>策略引擎、策略负责人。</td></tr>
+          <tr><td><code>/api/review/session/recompute</code></td><td><span class="method">POST</span></td><td>重新计算复盘指标和建议。</td><td>复盘任务、策略优化。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="schemas">
+      <h2>8. 数据结构说明</h2>
+
+      <h3 id="schema-account">8.1 账户信息 Account</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>account_name</code></td><td><code>string</code></td><td>账户展示名。</td></tr>
+          <tr><td><code>account_type</code></td><td><code>string</code></td><td><code>live</code> / <code>paper</code> / <code>backtest</code>。</td></tr>
+          <tr><td><code>account_type_label</code></td><td><code>string</code></td><td>账户类型中文名。</td></tr>
+          <tr><td><code>market</code></td><td><code>string</code></td><td>交易市场，如深圳 A 股、上海 A 股。</td></tr>
+          <tr><td><code>shareholder_account</code></td><td><code>string</code></td><td>股东账号，建议脱敏。</td></tr>
+          <tr><td><code>capital_account</code></td><td><code>string</code></td><td>资金账号，建议脱敏。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="schema-balance">8.2 资金快照 Balance</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>account_id</code></td><td><code>string</code></td><td>账户标识。</td></tr>
+          <tr><td><code>mode</code></td><td><code>string</code></td><td>账户模式，当前为 <code>live</code>。</td></tr>
+          <tr><td><code>total_asset</code></td><td><code>decimal string</code></td><td>总资产。</td></tr>
+          <tr><td><code>available_cash</code></td><td><code>decimal string</code></td><td>可用资金。</td></tr>
+          <tr><td><code>withdrawable_cash</code></td><td><code>decimal string</code></td><td>可取资金。</td></tr>
+          <tr><td><code>market_value</code></td><td><code>decimal string</code></td><td>股票持仓市值。</td></tr>
+          <tr><td><code>cash_balance</code></td><td><code>decimal string</code></td><td>资金余额。</td></tr>
+          <tr><td><code>frozen_cash</code></td><td><code>decimal string</code></td><td>冻结资金。</td></tr>
+          <tr><td><code>updated_at</code></td><td><code>datetime string</code></td><td>更新时间。</td></tr>
+          <tr><td><code>raw</code></td><td><code>object</code></td><td>交易端原始返回，用于排查和对账。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="schema-position">8.3 持仓 Position</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>position_id</code></td><td><code>string</code></td><td>持仓标识，通常取证券代码。</td></tr>
+          <tr><td><code>symbol</code></td><td><code>string</code></td><td>证券代码。</td></tr>
+          <tr><td><code>name</code></td><td><code>string</code></td><td>证券名称。</td></tr>
+          <tr><td><code>quantity</code></td><td><code>integer</code></td><td>当前持仓数量。</td></tr>
+          <tr><td><code>available_quantity</code></td><td><code>integer</code></td><td>可卖数量。</td></tr>
+          <tr><td><code>cost_price</code></td><td><code>decimal string</code></td><td>成本价。</td></tr>
+          <tr><td><code>last_price</code></td><td><code>decimal string</code></td><td>最新价。</td></tr>
+          <tr><td><code>market_value</code></td><td><code>decimal string</code></td><td>持仓市值。</td></tr>
+          <tr><td><code>unrealized_pnl</code></td><td><code>decimal string</code></td><td>浮动盈亏。</td></tr>
+          <tr><td><code>updated_at</code></td><td><code>datetime string</code></td><td>更新时间。</td></tr>
+          <tr><td><code>raw</code></td><td><code>object</code></td><td>交易端原始持仓行。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="schema-order">8.4 委托 Order</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>order_id</code></td><td><code>string</code></td><td>系统或交易端委托编号。</td></tr>
+          <tr><td><code>broker_order_id</code></td><td><code>string</code></td><td>券商合同编号，用于撤单和对账。</td></tr>
+          <tr><td><code>symbol</code></td><td><code>string</code></td><td>证券代码。</td></tr>
+          <tr><td><code>name</code></td><td><code>string</code></td><td>证券名称。</td></tr>
+          <tr><td><code>side</code></td><td><code>string</code></td><td><code>buy</code> / <code>sell</code>。</td></tr>
+          <tr><td><code>price</code></td><td><code>decimal string</code></td><td>委托价格。</td></tr>
+          <tr><td><code>quantity</code></td><td><code>integer</code></td><td>委托数量。</td></tr>
+          <tr><td><code>filled_quantity</code></td><td><code>integer</code></td><td>已成交数量。</td></tr>
+          <tr><td><code>avg_fill_price</code></td><td><code>decimal string</code></td><td>成交均价。</td></tr>
+          <tr><td><code>status</code></td><td><code>string</code></td><td>委托状态，以交易端返回为准。</td></tr>
+          <tr><td><code>submitted_at</code></td><td><code>datetime string</code></td><td>委托时间。</td></tr>
+          <tr><td><code>raw</code></td><td><code>object</code></td><td>交易端原始委托行。</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="schema-trade">8.5 成交 Trade</h3>
+      <table>
+        <thead><tr><th>字段</th><th>类型</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td><code>trade_id</code></td><td><code>string</code></td><td>系统成交 ID 或交易端成交编号。</td></tr>
+          <tr><td><code>broker_trade_id</code></td><td><code>string</code></td><td>券商成交编号。</td></tr>
+          <tr><td><code>order_id</code></td><td><code>string</code></td><td>关联委托编号。</td></tr>
+          <tr><td><code>symbol</code></td><td><code>string</code></td><td>证券代码。</td></tr>
+          <tr><td><code>name</code></td><td><code>string</code></td><td>证券名称。</td></tr>
+          <tr><td><code>side</code></td><td><code>string</code></td><td><code>buy</code> / <code>sell</code>。</td></tr>
+          <tr><td><code>price</code></td><td><code>decimal string</code></td><td>成交价格。</td></tr>
+          <tr><td><code>quantity</code></td><td><code>integer</code></td><td>成交数量。</td></tr>
+          <tr><td><code>amount</code></td><td><code>decimal string</code></td><td>成交金额。</td></tr>
+          <tr><td><code>commission</code></td><td><code>decimal string</code></td><td>佣金。</td></tr>
+          <tr><td><code>stamp_tax</code></td><td><code>decimal string</code></td><td>印花税。</td></tr>
+          <tr><td><code>traded_at</code></td><td><code>datetime string</code></td><td>成交时间。</td></tr>
+          <tr><td><code>source</code></td><td><code>string</code></td><td>数据来源，当前实盘为 <code>live</code>。</td></tr>
+          <tr><td><code>raw</code></td><td><code>object</code></td><td>交易端原始成交行。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="errors">
+      <h2>9. 错误码与异常</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>HTTP 状态码</th>
+            <th>场景</th>
+            <th>响应示例</th>
+            <th>下游处理建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>400</code></td>
+            <td>请求参数不符合业务规则，例如非 <code>live</code> 模式下单。</td>
+            <td><code>{"detail":{"message":"当前桌面适配器只实现 live 实盘模式。"}}</code></td>
+            <td>调用方修正参数后重试。</td>
+          </tr>
+          <tr>
+            <td><code>409</code></td>
+            <td>需要人工验证码，或交易客户端未就绪。</td>
+            <td><code>{"detail":{"message":"检测到验证码弹窗，请在同花顺中人工处理后重试。"}}</code></td>
+            <td>前端提示人工处理；策略执行应暂停自动下单并告警。</td>
+          </tr>
+          <tr>
+            <td><code>422</code></td>
+            <td>Pydantic 参数校验失败，例如数量不是 100 股整数倍、价格小于等于 0。</td>
+            <td>FastAPI 默认校验错误结构。</td>
+            <td>调用方按字段错误提示修正。</td>
+          </tr>
+          <tr>
+            <td><code>500</code></td>
+            <td>自动化适配器、数据库或未知服务异常。</td>
+            <td><code>{"detail":{"message":"...", "type":"ExceptionName"}}</code></td>
+            <td>记录请求参数和错误详情，通知账户交易模块负责人排查。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="flow">
+      <h2>10. 推荐调用流程</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>策略执行下单流程</h3>
+          <ol>
+            <li>调用 <code>GET /api/account/automation/status</code>，确认 <code>connected=true</code> 且 <code>ready=true</code>。</li>
+            <li>调用 <code>GET /api/account/balance</code> 和 <code>GET /api/account/positions</code>，获取资金与持仓。</li>
+            <li>风控模块完成资金、仓位、涨跌停、停牌等检查。</li>
+            <li>调用 <code>POST /api/account/order</code>，必须携带 <code>idempotency_key</code>。</li>
+            <li>调用 <code>GET /api/account/orders?scope=today</code> 回查委托状态。</li>
+            <li>调用 <code>GET /api/account/trades?scope=today</code> 回查成交结果。</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>页面刷新同步流程</h3>
+          <ol>
+            <li>进入账户页面后调用 <code>GET /api/account/automation/status</code>。</li>
+            <li>用户点击同步时调用 <code>POST /api/account/sync</code>。</li>
+            <li>页面使用返回的 <code>balance</code>、<code>positions</code>、<code>orders</code>、<code>trades</code> 一次性刷新。</li>
+            <li>如果遇到 <code>409</code> 验证码，提示用户到同花顺客户端处理。</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>复盘分析流程</h3>
+          <ol>
+            <li>从账户交易模块读取成交、委托、持仓、资金快照。</li>
+            <li>按 <code>account_type</code> 区分实盘、模拟盘和回测数据。</li>
+            <li>生成复盘会话和指标快照。</li>
+            <li>下游调用 <code>/api/review/report</code>、<code>/api/review/trades</code>、<code>/api/review/suggestions</code>。</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>撤单流程</h3>
+          <ol>
+            <li>调用 <code>GET /api/account/orders?scope=today</code> 获取可撤委托。</li>
+            <li>取 <code>broker_order_id</code> 作为 <code>entrust_no</code>。</li>
+            <li>调用 <code>POST /api/account/order/{entrust_no}/cancel</code>。</li>
+            <li>再次调用 <code>GET /api/account/orders?scope=today</code> 确认状态。</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section id="todo">
+      <h2>11. 待确认事项</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>事项</th>
+            <th>建议</th>
+            <th>影响模块</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>证券代码格式</td>
+            <td>跨模块建议统一使用 <code>600519.SH</code> / <code>301183.SZ</code>，账户交易适配层负责转为交易端所需格式。</td>
+            <td>行情、策略执行、账户交易、复盘。</td>
+          </tr>
+          <tr>
+            <td>复盘接口正式字段</td>
+            <td>当前 <code>/api/review/*</code> 为占位，需要按本文档建议结构补齐 Pydantic schema 和真实查询。</td>
+            <td>复盘、策略优化、前端复盘页。</td>
+          </tr>
+          <tr>
+            <td>模拟盘和回测账户 API</td>
+            <td>账户交易对外 API 建议继续保持统一，通过 <code>account_type</code> 路由到 <code>live_*</code>、<code>paper_*</code>、<code>backtest_*</code> 表族。</td>
+            <td>账户交易、历史回放、策略执行。</td>
+          </tr>
+          <tr>
+            <td>幂等键规则</td>
+            <td>实盘下单必须由调用方生成 <code>idempotency_key</code>，建议格式为 UUID，并与策略信号 ID 建立映射。</td>
+            <td>策略执行、账户交易、审计。</td>
+          </tr>
+          <tr>
+            <td>验证码处理</td>
+            <td>自动任务默认不应无限等待验证码；策略执行场景建议设置超时并转人工告警。</td>
+            <td>策略执行、前端账户页、运维监控。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

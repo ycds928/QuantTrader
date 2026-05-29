@@ -88,3 +88,7 @@ logs/
 *.pptx
 *.xlsx
 *.csv
+
+# 本地临时/历史输出
+yjx.md
+docs/yang-jingxi-api-contract.html
