@@ -11,7 +11,18 @@ import {
 } from '@/api-data/api'
 import type { StockBaseInfo, KLineData, RealTimeQuote, StockListItem } from '@/api-data/types'
 
-const TIMEFRAMES = ['1m', '5m', '1h', '1d']
+// 支持的K线周期
+const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '1d', '1w']
+// 周期显示名称映射
+const TIMEFRAME_LABELS: Record<string, string> = {
+  '1m': '1分',
+  '5m': '5分',
+  '15m': '15分',
+  '30m': '30分',
+  '1h': '1时',
+  '1d': '日',
+  '1w': '周',
+}
 
 export default function SymbolDetail() {
   const [searchParams] = useSearchParams()
@@ -170,7 +181,7 @@ export default function SymbolDetail() {
                   onClick={() => setTimeframe(tf)}
                   className={`px-3 py-1 text-xs rounded-md transition-colors ${timeframe === tf ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'}`}
                 >
-                  {tf}
+                  {TIMEFRAME_LABELS[tf] || tf}
                 </button>
               ))}
             </div>

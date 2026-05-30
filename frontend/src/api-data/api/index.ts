@@ -9,6 +9,7 @@ import type {
   BatchStockQuery,
   StockSyncRequest,
   KLineSyncRequest,
+  StockSearchQuery,
 } from '@/api-data/types'
 
 // ========== 个股接口 ==========
@@ -23,6 +24,10 @@ export async function syncStocks(data: StockSyncRequest): Promise<StockBaseInfo[
 
 export async function getStockList(market?: string): Promise<StockListItem[]> {
   return request.get('/api-data/stock/list', { params: { market } })
+}
+
+export async function searchStocks(params: StockSearchQuery): Promise<StockListItem[]> {
+  return request.get('/api-data/stock/search', { params })
 }
 
 // ========== K线接口 ==========

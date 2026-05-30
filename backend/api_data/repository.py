@@ -1,4 +1,4 @@
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from typing import Optional
@@ -55,6 +55,28 @@ class StockRepository:
         for stock_data in stocks_data:
             results.append(await self.upsert(stock_data))
         return results
+
+    async def search_by_name(
+        self,
+        keyword: str,
+        market: Optional[str] = None,
+        limit: int = 50
+    ) -> list[StockBaseInfoModel]:
+        """根据股票名称或代码模糊搜索"""
+        query = select(StockBaseInfoModel).where(
+            and_(
+                StockBaseInfoModel.status == "active",
+                or_(
+                    StockBaseInfoModel.symbol.like(f"%{keyword}%"),
+                    StockBaseInfoModel.name.like(f"%{keyword}%")
+                )
+            )
+        )
+        if market:
+            query = query.where(StockBaseInfoModel.market == market)
+        query = query.limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
 
 
 class KLineRepository:

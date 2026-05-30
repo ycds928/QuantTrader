@@ -120,15 +120,15 @@ class AkshareAdapter(DataSourceAdapter):
         if not start_date:
             start_date = (datetime.now() - timedelta(days=limit * 2)).strftime("%Y%m%d")
 
-        # 转换 timeframe
+        # 转换 timeframe (支持的级别: 1m/5m/15m/30m/1h/1d/1w)
         period_map = {
-            "1d": "daily",
-            "1w": "weekly",
-            "1m": "monthly",
+            "1m": "1",
             "5m": "5",
             "15m": "15",
             "30m": "30",
             "1h": "60",
+            "1d": "daily",
+            "1w": "weekly",
         }
         period = period_map.get(timeframe, "daily")
 

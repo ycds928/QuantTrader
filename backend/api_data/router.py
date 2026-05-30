@@ -17,6 +17,7 @@ from .schemas import (
     StockSyncRequest,
     KLineSyncRequest,
     SectorStocksQuery,
+    StockSearchQuery,
 )
 from .service import StockService, KLineService, MarketDataService, SectorService
 from .repository import (
@@ -94,13 +95,25 @@ async def get_stock_list(
     return success_response(data, "获取成功")
 
 
+@router.get("/stock/search")
+async def search_stocks(
+    keyword: str = Query(..., min_length=1, max_length=50, description="搜索关键词（股票代码或名称）"),
+    market: Optional[str] = Query(None, description="市场类型 A/HK/US"),
+    limit: int = Query(50, ge=1, le=200, description="返回条数"),
+    service: StockService = Depends(get_stock_service),
+):
+    """根据股票名称或代码模糊搜索"""
+    data = await service.search_stocks(keyword, market, limit)
+    return success_response(data, "搜索成功")
+
+
 # ========== K线接口 ==========
 
 
 @router.get("/kline/{symbol}")
 async def get_kline(
     symbol: str,
-    timeframe: str = Query("1d", description="时间周期: 1m/5m/1h/1d"),
+    timeframe: str = Query("1d", description="时间周期: 1m/5m/15m/30m/1h/1d/1w"),
     start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     limit: int = Query(100, ge=1, le=1000, description="返回条数"),

@@ -1,10 +1,27 @@
-import { useState, useEffect } from 'react'
-import { Search, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Search, RefreshCw, TrendingUp, TrendingDown, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { AppLayout } from '@/common/components'
 import { formatNumber, formatPercent } from '@/common/utils'
-import { getStockList, getBatchRealtimeQuote } from '@/api-data/api'
+import { getStockList, searchStocks, getBatchRealtimeQuote } from '@/api-data/api'
 import type { StockListItem, RealTimeQuote } from '@/api-data/types'
+
+// 防抖Hook
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
+}
 
 export default function ApiData() {
   const [stocks, setStocks] = useState<StockListItem[]>([])
@@ -12,16 +29,18 @@ export default function ApiData() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [selectedMarket, setSelectedMarket] = useState<string | undefined>(undefined)
+  const [isSearchMode, setIsSearchMode] = useState(false)
 
-  useEffect(() => {
-    loadStocks()
-  }, [selectedMarket])
+  // 防抖搜索
+  const debouncedSearch = useDebounce(search, 300)
 
-  async function loadStocks() {
+  // 加载股票列表
+  const loadStocks = useCallback(async () => {
     setLoading(true)
     try {
       const list = await getStockList(selectedMarket)
       setStocks(list)
+      setIsSearchMode(false)
       // 批量获取实时行情
       if (list.length > 0) {
         const symbols = list.slice(0, 20).map(s => s.symbol)
@@ -35,11 +54,50 @@ export default function ApiData() {
     } finally {
       setLoading(false)
     }
+  }, [selectedMarket])
+
+  // 搜索股票
+  const searchStocksData = useCallback(async () => {
+    if (!debouncedSearch.trim()) {
+      loadStocks()
+      return
+    }
+
+    setLoading(true)
+    try {
+      const list = await searchStocks({ keyword: debouncedSearch, market: selectedMarket, limit: 100 })
+      setStocks(list)
+      setIsSearchMode(true)
+      // 批量获取实时行情
+      if (list.length > 0) {
+        const symbols = list.slice(0, 20).map(s => s.symbol)
+        const quotesData = await getBatchRealtimeQuote({ symbols })
+        const quotesMap: Record<string, RealTimeQuote> = {}
+        quotesData.forEach(q => { quotesMap[q.symbol] = q })
+        setQuotes(quotesMap)
+      }
+    } catch (e) {
+      console.error('Failed to search stocks:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [debouncedSearch, selectedMarket, loadStocks])
+
+  // 清空搜索
+  const clearSearch = () => {
+    setSearch('')
+    loadStocks()
   }
 
-  const filteredStocks = stocks.filter(s =>
-    s.name.includes(search) || s.symbol.includes(search)
-  )
+  useEffect(() => {
+    loadStocks()
+  }, [selectedMarket, loadStocks])
+
+  useEffect(() => {
+    if (debouncedSearch) {
+      searchStocksData()
+    }
+  }, [debouncedSearch, searchStocksData])
 
   return (
     <AppLayout>
@@ -53,8 +111,16 @@ export default function ApiData() {
               placeholder="搜索股票名称/代码..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-surface-container rounded-md text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50"
+              className="w-full pl-10 pr-10 py-2 bg-surface-container rounded-md text-sm text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary/50"
             />
+            {search && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -81,6 +147,11 @@ export default function ApiData() {
 
         {/* 股票列表 */}
         <div className="bg-surface-container-high rounded-lg overflow-hidden">
+          {isSearchMode && (
+            <div className="text-xs text-on-surface-variant py-2 px-4 border-b border-outline-variant/20">
+              搜索 "{search}" 的结果：共 {stocks.length} 条
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead>
               <tr className="text-on-surface-variant text-xs border-b border-outline-variant/20">
@@ -94,7 +165,7 @@ export default function ApiData() {
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/20">
-              {filteredStocks.map(stock => {
+              {stocks.map(stock => {
                 const quote = quotes[stock.symbol]
                 return (
                   <tr key={stock.symbol} className="hover:bg-surface-container transition-colors">
@@ -124,10 +195,10 @@ export default function ApiData() {
                   </tr>
                 )
               })}
-              {filteredStocks.length === 0 && !loading && (
+              {stocks.length === 0 && !loading && (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-on-surface-variant">
-                    暂无数据
+                    {isSearchMode ? '未找到匹配的股票' : '暂无数据'}
                   </td>
                 </tr>
               )}

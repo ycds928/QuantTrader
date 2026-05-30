@@ -34,6 +34,28 @@ class StockService:
             await self.stock_repo.upsert(stock_data)
         return stocks_data
 
+    async def search_stocks(
+        self,
+        keyword: str,
+        market: Optional[str] = None,
+        limit: int = 50
+    ) -> list[dict]:
+        """根据股票名称或代码模糊搜索"""
+        stocks = await self.stock_repo.search_by_name(keyword, market, limit)
+        return [
+            {
+                "symbol": s.symbol,
+                "name": s.name,
+                "market": s.market,
+                "sector": s.sector,
+                "IPO_date": s.IPO_date,
+                "total_shares": s.total_shares,
+                "float_shares": s.float_shares,
+                "status": s.status,
+            }
+            for s in stocks
+        ]
+
 
 class KLineService:
     """K线服务"""

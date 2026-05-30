@@ -66,10 +66,17 @@ export interface StockListItem {
   sector: string | null
 }
 
+/** 股票搜索查询 */
+export interface StockSearchQuery {
+  keyword: string
+  market?: string
+  limit?: number
+}
+
 /** K线查询参数 */
 export interface KLineQuery {
   symbol: string
-  timeframe?: string
+  timeframe?: string  // 时间周期: 1m/5m/15m/30m/1h/1d/1w
   start_date?: string
   end_date?: string
   limit?: number

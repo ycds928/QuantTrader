@@ -87,22 +87,30 @@ CREATE TABLE stock_base_info (
 ```sql
 CREATE TABLE kline_data (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    symbol VARCHAR(10) NOT NULL COMMENT '股票代码',
-    trade_date DATE NOT NULL COMMENT '交易日期',
-    open DECIMAL(10,3) COMMENT '开盘价',
-    high DECIMAL(10,3) COMMENT '最高价',
-    low DECIMAL(10,3) COMMENT '最低价',
-    close DECIMAL(10,3) COMMENT '收盘价',
-    volume BIGINT COMMENT '成交量',
-    amount DECIMAL(20,3) COMMENT '成交额',
-    adjust_type VARCHAR(10) DEFAULT 'qfq' COMMENT '复权类型 qfq/hfq',
-    data_source VARCHAR(50) COMMENT '数据来源标识',
+    symbol VARCHAR(20) NOT NULL COMMENT '股票代码',
+    timeframe VARCHAR(10) NOT NULL COMMENT '时间周期 1m/5m/15m/30m/1h/1d/1w',
+    timestamp TIMESTAMP NOT NULL COMMENT 'K线时间戳',
+    open FLOAT NOT NULL COMMENT '开盘价',
+    high FLOAT NOT NULL COMMENT '最高价',
+    low FLOAT NOT NULL COMMENT '最低价',
+    close FLOAT NOT NULL COMMENT '收盘价',
+    volume FLOAT NOT NULL COMMENT '成交量',
+    turnover FLOAT COMMENT '成交额',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uk_symbol_date (symbol, trade_date, adjust_type),
-    INDEX idx_symbol (symbol),
-    INDEX idx_trade_date (trade_date)
+    UNIQUE KEY uk_symbol_timeframe_timestamp (symbol, timeframe, timestamp),
+    INDEX idx_symbol_timeframe (symbol, timeframe),
+    INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
+
+**支持的级别（timeframe）**：
+- `1m` - 1分钟
+- `5m` - 5分钟
+- `15m` - 15分钟
+- `30m` - 30分钟
+- `1h` - 1小时
+- `1d` - 日线
+- `1w` - 周线
 
 ### 4.3 realtime_quote（实时行情表）
 ```sql
@@ -155,15 +163,14 @@ class StockBaseInfo(BaseModel):
 
 class KLineData(BaseModel):
     symbol: str
-    trade_date: date
+    timeframe: str  # 1m/5m/15m/30m/1h/1d/1w
+    timestamp: datetime
     open: float
     high: float
     low: float
     close: float
-    volume: int
-    amount: float | None = None
-    adjust_type: str = "qfq"
-    data_source: str | None = None
+    volume: float
+    turnover: float | None = None
 
 class RealTimeQuote(BaseModel):
     symbol: str
@@ -186,12 +193,18 @@ class SectorInfo(BaseModel):
 ```python
 class KLineQuery(BaseModel):
     symbol: str
-    start_date: date
-    end_date: date
-    adjust_type: str = "qfq"
+    timeframe: str = "1d"  # 1m/5m/15m/30m/1h/1d/1w
+    start_date: date | None = None
+    end_date: date | None = None
+    limit: int = 100
 
 class BatchStockQuery(BaseModel):
     symbol_list: list[str]
+
+class StockSearchQuery(BaseModel):
+    keyword: str  # 搜索关键词（股票代码或名称）
+    market: str | None = None  # 市场类型 A/HK/US
+    limit: int = 50  # 返回条数，最大200
 
 class ApiResponse(BaseModel):
     success: bool
@@ -223,7 +236,7 @@ class DataSourceAdapter(Protocol):
 
     def batch_get_stock_base_info(self, symbol_list: list[str]) -> list[StockBaseInfo]: ...
 
-    def get_kline_data(self, symbol: str, start_date: date, end_date: date, adjust_type: str) -> list[KLineData]: ...
+    def get_kline_data(self, symbol: str, timeframe: str, start_date: date | None, end_date: date | None, limit: int) -> list[KLineData]: ...
 
     def get_realtime_quote(self, symbol: str) -> RealTimeQuote: ...
 
@@ -260,16 +273,16 @@ class StockService:
         """获取个股基础信息"""
         ...
 
-    def sync_stock_base_to_db(self, symbol: str) -> bool:
-        """同步个股基础信息到数据库"""
+    def list_stocks(self, market: str | None = None) -> list[StockBaseInfo]:
+        """获取股票列表"""
         ...
 
-    def batch_sync_stock_base_to_db(self, symbol_list: list[str]) -> int:
-        """批量同步"""
+    def search_stocks(self, keyword: str, market: str | None = None, limit: int = 50) -> list[StockBaseInfo]:
+        """根据股票名称或代码模糊搜索"""
         ...
 
-    def get_stock_base_from_db(self, symbol: str) -> StockBaseInfo | None:
-        """从数据库获取个股基础信息"""
+    def sync_stocks(self, symbols: list[str] | None = None) -> list[StockBaseInfo]:
+        """同步股票信息到数据库"""
         ...
 ```
 
@@ -285,10 +298,10 @@ class KLineService:
     def get_kline_data(
         self,
         symbol: str,
-        start_date: date,
-        end_date: date,
-        adjust_type: str = "qfq",
-        prefer_cache: bool = True
+        timeframe: str = "1d",
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 100
     ) -> list[KLineData]:
         """获取K线数据（优先数据库，辅以数据源）"""
         ...
@@ -356,11 +369,11 @@ class SectorService:
 class StockRepository:
     """个股信息仓库"""
 
-    async def save(self, stock_info: StockBaseInfo) -> bool: ...
-    async def batch_save(self, stock_list: list[StockBaseInfo]) -> int: ...
     async def get_by_symbol(self, symbol: str) -> StockBaseInfo | None: ...
-    async def get_all(self) -> list[StockBaseInfo]: ...
-    async def exists(self, symbol: str) -> bool: ...
+    async def get_all(self, market: str | None = None, limit: int = 100, offset: int = 0) -> list[StockBaseInfo]: ...
+    async def search_by_name(self, keyword: str, market: str | None = None, limit: int = 50) -> list[StockBaseInfo]: ...
+    async def upsert(self, stock_data: dict) -> StockBaseInfo: ...
+    async def batch_upsert(self, stocks_data: list[dict]) -> list[StockBaseInfo]: ...
 
 class KLineRepository:
     """K线数据仓库"""
@@ -370,11 +383,12 @@ class KLineRepository:
     async def query(
         self,
         symbol: str,
-        start_date: date,
-        end_date: date,
-        adjust_type: str = "qfq"
+        timeframe: str = "1d",
+        start_date: date | None = None,
+        end_date: date | None = None,
+        limit: int = 100
     ) -> list[KLineData]: ...
-    async def get_latest_date(self, symbol: str, adjust_type: str = "qfq") -> date | None: ...
+    async def get_latest_date(self, symbol: str, timeframe: str = "1d") -> date | None: ...
 
 class RealtimeQuoteRepository:
     """实时行情仓库"""
@@ -408,17 +422,24 @@ POST /api/api-data/stock/sync
      → 批量同步个股信息到数据库
 
 GET  /api/api-data/stock/list
+     params: market
      → 获取所有个股列表
+
+GET  /api/api-data/stock/search
+     params: keyword, market, limit
+     → 根据股票名称或代码模糊搜索
+     keyword: 搜索关键词（支持股票代码和名称模糊匹配）
 ```
 
 ### 9.2 K线数据接口
 ```
 GET  /api/api-data/kline/{symbol}
-     params: start_date, end_date, adjust_type
+     params: timeframe, start_date, end_date, limit
      → 获取K线数据（优先数据库）
+     timeframe: 1m/5m/15m/30m/1h/1d/1w
 
 POST /api/api-data/kline/{symbol}/sync
-     body: {"kline_list": [...]}
+     body: {"timeframe": "1d", "start_date": "...", "end_date": "..."}
      → 同步K线数据到数据库
 ```
 
@@ -502,11 +523,16 @@ stock_service = StockService(data_source, StockRepository())
 
 ### 12.2 获取数据（自动处理缓存）
 ```python
-# 优先从数据库获取，无则从数据源获取
+# 获取个股基础信息
 stock_info = await stock_service.get_stock_base_info("000001")
 
-# 强制从数据源获取并更新缓存
-stock_info = await stock_service.get_stock_base_info("000001", use_cache=False)
+# 获取K线数据（支持多种级别）
+klines_1d = await kline_service.get_kline_data("000001", timeframe="1d", limit=100)
+klines_1h = await kline_service.get_kline_data("000001", timeframe="1h", limit=100)
+klines_5m = await kline_service.get_kline_data("000001", timeframe="5m", limit=100)
+
+# 获取实时行情
+quote = await market_service.get_realtime_quote("000001")
 ```
 
 ### 12.3 同步数据到数据库
@@ -528,6 +554,7 @@ await stock_service.batch_sync_stock_base_to_db(["000001", "000002"])
 4. **批量操作支持**: 批量获取、批量写入数据库
 5. **数据模型统一**: SQLAlchemy模型与Pydantic模型分离，数据库结构与API响应解耦
 6. **异步优先**: 使用 SQLAlchemy 2.0 async 模式，配合 `await` 异步操作
+7. **级别支持**: K线数据支持多个时间周期（1m/5m/15m/30m/1h/1d/1w），通过 (symbol, timeframe, timestamp) 唯一索引区分
 
 ---
 
@@ -587,9 +614,12 @@ await stock_service.batch_sync_stock_base_to_db(["000001", "000002"])
 ```python
 # 方式1: 直接调用 API
 GET http://localhost:8000/api/api-data/stock/list
-GET http://localhost:8000/api/api-data/kline/{symbol}
+GET http://localhost:8000/api/api-data/kline/{symbol}?timeframe=1d
 GET http://localhost:8000/api/api-data/realtime/{symbol}
 GET http://localhost:8000/api/api-data/sector
+
+# K线级别参数
+timeframe: 1m/5m/15m/30m/1h/1d/1w
 
 # 方式2: 导入 api_data 模块（需等 Phase 2）
 from api_data.service import StockService, KLineService

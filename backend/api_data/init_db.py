@@ -42,7 +42,7 @@ async def create_tables():
             CREATE TABLE IF NOT EXISTS kline_data (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
                 symbol VARCHAR(20) NOT NULL COMMENT '股票代码',
-                timeframe VARCHAR(10) NOT NULL COMMENT '时间周期 1m/5m/1h/1d',
+                timeframe VARCHAR(10) NOT NULL COMMENT '时间周期 1m/5m/15m/30m/1h/1d/1w',
                 timestamp TIMESTAMP NOT NULL COMMENT 'K线时间戳',
                 open FLOAT NOT NULL COMMENT '开盘价',
                 high FLOAT NOT NULL COMMENT '最高价',
@@ -51,6 +51,7 @@ async def create_tables():
                 volume FLOAT NOT NULL COMMENT '成交量',
                 turnover FLOAT COMMENT '成交额',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_symbol_timeframe_timestamp (symbol, timeframe, timestamp),
                 INDEX idx_symbol_timeframe (symbol, timeframe),
                 INDEX idx_timestamp (timestamp)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4

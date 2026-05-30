@@ -76,7 +76,7 @@ class StockListItem(BaseModel):
 class KLineQuery(BaseModel):
     """K线查询参数"""
     symbol: str = Field(..., description="股票代码")
-    timeframe: str = Field(default="1d", description="时间周期: 1m/5m/1h/1d")
+    timeframe: str = Field(default="1d", description="时间周期: 1m/5m/15m/30m/1h/1d/1w")
     start_date: Optional[str] = Field(None, description="开始日期 YYYY-MM-DD")
     end_date: Optional[str] = Field(None, description="结束日期 YYYY-MM-DD")
     limit: int = Field(default=100, ge=1, le=1000, description="返回条数")
@@ -103,3 +103,10 @@ class KLineSyncRequest(BaseModel):
 class SectorStocksQuery(BaseModel):
     """板块成分股查询"""
     sector_code: str
+
+
+class StockSearchQuery(BaseModel):
+    """股票搜索查询"""
+    keyword: str = Field(..., min_length=1, max_length=50, description="搜索关键词（股票代码或名称）")
+    market: Optional[str] = Field(None, description="市场类型 A/HK/US")
+    limit: int = Field(default=50, ge=1, le=200, description="返回条数")
